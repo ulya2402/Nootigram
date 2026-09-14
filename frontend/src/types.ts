@@ -18,10 +18,20 @@ export interface TopicItem {
 
 export type ContentBlock =
   | { id: string; type: 'paragraph'; text: string }
-  | { id: string; type: 'heading'; size: 2 | 3 | 4; text: string }
+  | { id: string; type: 'heading'; size: 1 | 2 | 3 | 4 | 5 | 6; text: string }
   | { id: string; type: 'quote'; text: string; credit?: string }
-  | { id: string; type: 'list'; items: TaskItem[] }
-  | { id: string; type: 'table'; cells: TableCell[][] }
+  | { id: string; type: 'expandable_quote'; text: string; credit?: string }
+  | { id: string; type: 'pullquote'; text: string; credit?: string }
+  | { id: string; type: 'list'; style: 'task' | 'bullet' | 'ordered'; items: TaskItem[] }
+  | { 
+      id: string; 
+      type: 'table'; 
+      cells: TableCell[][]; 
+      is_bordered?: boolean; 
+      is_striped?: boolean;
+      is_compact?: boolean;
+      caption?: string;
+    }
   | { id: string; type: 'code'; text: string; language?: string }
   | { id: string; type: 'math'; expression: string }
   | { id: string; type: 'details'; summary: string; text: string }

@@ -66,6 +66,10 @@ export class TelegramService {
         } else if (b.type === 'blockquote') {
           const quoteText = b.blocks && b.blocks[0] && 'text' in b.blocks[0] ? (b.blocks[0] as any).text : '';
           md += `>${quoteText}\n\n`;
+        } else if (b.type === 'expandable_blockquote') {
+          md += `**>${b.text}**\n\n`;
+        } else if (b.type === 'pullquote') {
+          md += `_${b.text}_\n\n`;
         } else if (b.type === 'pre') {
           md += `\`\`\`${b.language || ''}\n${b.text}\n\`\`\`\n\n`;
         } else if (b.type === 'mathematical_expression') {
@@ -80,9 +84,12 @@ export class TelegramService {
         } else if (b.type === 'list') {
           for (const item of b.items) {
             const itemText = item.blocks && item.blocks[0] && 'text' in item.blocks[0] ? (item.blocks[0] as any).text : '';
-            md += `${item.is_checked ? '☑' : '☐'} ${itemText}\n`;
+            md += `${item.has_checkbox ? (item.is_checked ? '☑ ' : '☐ ') : '• '}${itemText}\n`;
           }
           md += '\n';
+        } else if (b.type === 'details') {
+          const detText = b.blocks && b.blocks[0] && 'text' in b.blocks[0] ? (b.blocks[0] as any).text : '';
+          md += `*${b.summary}*\n${detText}\n\n`;
         }
       }
     }

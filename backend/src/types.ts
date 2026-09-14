@@ -18,7 +18,9 @@ export type InputRichBlock =
       type: 'table'; 
       cells: { text: string; is_header?: boolean; align?: 'left' | 'center' | 'right' }[][]; 
       is_bordered?: boolean; 
-      is_striped?: boolean 
+      is_striped?: boolean;
+      is_compact?: boolean;
+      caption?: string;
     }
   | { 
       type: 'list'; 

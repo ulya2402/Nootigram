@@ -10,4 +10,4 @@ database_id = "0df2bc80-18ee-4bb7-8dd0-12a9a1a83027"
 
 [vars]
 ENVIRONMENT = "production"
-WEBAPP_URL = "https://notigram-app.pages.dev"
+WEBAPP_URL = "https://main.notigram-app.pages.dev"

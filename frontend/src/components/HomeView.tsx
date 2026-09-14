@@ -1,15 +1,16 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { NoteItem, TopicItem } from '../types';
 import { t } from '../services/i18n';
+import { formatRelativeTime } from '../utils/date';
 
 interface HomeViewProps {
   userName: string;
-  userPhoto?: string;
   notes: NoteItem[];
   topics: TopicItem[];
   onOpenNote: (note: NoteItem) => void;
   onToggleFavorite: (id: string, e: React.MouseEvent) => void;
   onDeleteNote: (id: string) => void;
+  onBatchDeleteNotes: (ids: string[]) => void;
 }
 
 function extractSnippet(note: NoteItem): string {
@@ -21,59 +22,91 @@ function extractSnippet(note: NoteItem): string {
   return note.content_raw || '';
 }
 
-function formatRelativeTime(dateStr: string): string {
-  if (!dateStr || dateStr === 'Baru saja' || dateStr === 'Recently') {
-    return t('time_just_now');
-  }
-
-  const parsed = new Date(dateStr);
-  if (isNaN(parsed.getTime())) {
-    return dateStr;
-  }
-
-  const diffMs = Date.now() - parsed.getTime();
-  const diffSec = Math.floor(diffMs / 1000);
-  const diffMin = Math.floor(diffSec / 60);
-  const diffHour = Math.floor(diffMin / 60);
-  const diffDay = Math.floor(diffHour / 24);
-
-  if (diffMin < 2) return t('time_just_now');
-  if (diffMin < 60) return t('time_mins_ago', { count: diffMin });
-  if (diffHour < 24) return t('time_hours_ago', { count: diffHour });
-  if (diffDay === 1) return t('time_yesterday');
-
-  return parsed.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-}
-
 export const HomeView: React.FC<HomeViewProps> = ({
   userName,
-  userPhoto,
   notes,
   topics,
   onOpenNote,
   onToggleFavorite,
   onDeleteNote,
+  onBatchDeleteNotes,
 }) => {
   const [selectedFilter, setSelectedFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [actionSheetNote, setActionSheetNote] = useState<NoteItem | null>(null);
+  const [isSelectMode, setIsSelectMode] = useState<boolean>(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const longPressTimerRef = useRef<number | null>(null);
 
   const triggerHaptic = (style: 'light' | 'medium' | 'heavy' = 'light') => {
     window.Telegram?.WebApp?.HapticFeedback?.impactOccurred(style);
   };
 
-  const handleTouchStart = (note: NoteItem) => {
+  useEffect(() => {
+    const tg = window.Telegram?.WebApp;
+    if (isSelectMode && tg?.BackButton) {
+      tg.BackButton.show();
+      const handleCancelSelection = () => {
+        triggerHaptic('light');
+        setIsSelectMode(false);
+        setSelectedIds(new Set());
+      };
+      tg.BackButton.onClick(handleCancelSelection);
+
+      return () => {
+        tg.BackButton.offClick(handleCancelSelection);
+        tg.BackButton.hide();
+      };
+    }
+  }, [isSelectMode]);
+
+  const handleTouchStart = (noteId: string) => {
+    if (isSelectMode) return;
     longPressTimerRef.current = window.setTimeout(() => {
       triggerHaptic('heavy');
-      setActionSheetNote(note);
-    }, 550);
+      setIsSelectMode(true);
+      setSelectedIds(new Set([noteId]));
+    }, 450);
   };
 
   const handleTouchEnd = () => {
     if (longPressTimerRef.current !== null) {
       clearTimeout(longPressTimerRef.current);
       longPressTimerRef.current = null;
+    }
+  };
+
+  const toggleSelect = (noteId: string) => {
+    triggerHaptic('light');
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(noteId)) {
+        next.delete(noteId);
+      } else {
+        next.add(noteId);
+      }
+      return next;
+    });
+  };
+
+  const selectAll = () => {
+    triggerHaptic('medium');
+    const allIds = filteredNotes.map((n) => n.id);
+    setSelectedIds(new Set(allIds));
+  };
+
+  const cancelSelection = () => {
+    triggerHaptic('light');
+    setIsSelectMode(false);
+    setSelectedIds(new Set());
+  };
+
+  const handleBatchDelete = () => {
+    if (selectedIds.size === 0) return;
+    triggerHaptic('medium');
+    if (window.confirm(t('batch_delete_confirm', { count: selectedIds.size }))) {
+      onBatchDeleteNotes(Array.from(selectedIds));
+      setIsSelectMode(false);
+      setSelectedIds(new Set());
     }
   };
 
@@ -90,27 +123,57 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
   return (
     <div className="flex flex-col w-full px-6 safe-bottom-space">
-      <section className="pt-2 pb-3 flex items-center justify-between">
-        <div className="flex flex-col gap-0.5">
-          <span className="text-[10px] font-semibold text-warm-accent tracking-widest uppercase">
-            {t('my_notes')}
-          </span>
+      {isSelectMode ? (
+        <section className="pt-2 pb-3 flex items-center justify-between border-b border-cream-divider animate-page-fade">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={cancelSelection}
+              className="text-xs font-semibold px-2.5 py-1 rounded-full bg-cream-surface text-warm-text physics-bounce"
+            >
+              {t('deselect_all')}
+            </button>
+            <span className="text-xs font-mono text-warm-accent font-semibold">
+              {t('selected_count', { count: selectedIds.size })}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={selectAll}
+              className="text-xs font-semibold px-2.5 py-1 rounded-full bg-cream-surface text-warm-text physics-bounce"
+            >
+              {t('select_all')}
+            </button>
+            <button
+              onClick={handleBatchDelete}
+              disabled={selectedIds.size === 0}
+              className="text-xs font-semibold px-3 py-1 rounded-full bg-red-600 text-white disabled:opacity-40 flex items-center gap-1 physics-bounce"
+            >
+              <span className="material-symbols-outlined text-[15px]">delete</span>
+              <span>{t('batch_delete')}</span>
+            </button>
+          </div>
+        </section>
+      ) : (
+        <section className="pt-2 pb-3 flex flex-col gap-1 border-b border-cream-divider/60">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-semibold text-warm-accent tracking-widest uppercase">
+              {t('my_notes')}
+            </span>
+            <span className="text-[11px] font-mono text-warm-muted">
+              {t('total_notes', { count: notes.length })}
+            </span>
+          </div>
           <h2 className="text-xl font-semibold text-warm-text tracking-tight leading-snug">
             {t('greeting', { name: userName })}
           </h2>
-          <p className="text-xs text-warm-muted line-clamp-1">{t('greeting_sub')}</p>
-        </div>
+          <p className="text-xs leading-relaxed text-warm-muted font-normal">
+            {t('greeting_sub')}
+          </p>
+        </section>
+      )}
 
-        <div className="w-10 h-10 rounded-full border border-cream-divider overflow-hidden flex items-center justify-center bg-cream-surface shrink-0">
-          {userPhoto ? (
-            <img src={userPhoto} alt={userName} className="w-full h-full object-cover" />
-          ) : (
-            <span className="text-sm font-semibold text-warm-text">{userName.charAt(0).toUpperCase()}</span>
-          )}
-        </div>
-      </section>
-
-      <section className="py-2">
+      <section className="py-2.5">
         <div className="relative flex items-center pb-1.5 border-b border-cream-divider focus-within:border-warm-accent transition-colors">
           <input
             className="w-full bg-transparent text-warm-text placeholder:text-warm-subtle text-sm py-1 focus:outline-none"
@@ -123,7 +186,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
         </div>
       </section>
 
-      <section className="py-2.5 overflow-x-auto -mx-6 px-6 no-scrollbar">
+      <section className="py-2 overflow-x-auto -mx-6 px-6 no-scrollbar">
         <div className="flex items-center gap-5 min-w-max border-b border-cream-divider/50 pb-2">
           <button
             onClick={() => {
@@ -177,68 +240,96 @@ export const HomeView: React.FC<HomeViewProps> = ({
             {filteredNotes.map((note) => {
               const snippet = extractSnippet(note);
               const categoryObj = topics.find((tItem) => tItem.id === note.category);
+              const isSelected = selectedIds.has(note.id);
 
               return (
                 <article
                   key={note.id}
-                  onTouchStart={() => handleTouchStart(note)}
+                  onTouchStart={() => handleTouchStart(note.id)}
                   onTouchEnd={handleTouchEnd}
                   onTouchMove={handleTouchEnd}
+                  onContextMenu={(e) => e.preventDefault()}
                   onClick={() => {
-                    triggerHaptic();
-                    onOpenNote(note);
+                    if (isSelectMode) {
+                      toggleSelect(note.id);
+                    } else {
+                      triggerHaptic();
+                      onOpenNote(note);
+                    }
                   }}
-                  className="py-3.5 border-b border-cream-divider/70 cursor-pointer physics-bounce flex flex-col gap-1 select-none"
+                  className={`py-3.5 border-b border-cream-divider/70 cursor-pointer physics-bounce flex items-start gap-3 select-none ${
+                    isSelected ? 'bg-cream-surface/50 -mx-3 px-3 rounded-lg' : ''
+                  }`}
                 >
-                  <div className="flex items-baseline justify-between gap-3">
-                    <h4 className="text-base font-semibold text-warm-text leading-snug">
-                      {note.title || t('title_placeholder')}
-                    </h4>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          triggerHaptic();
-                          onToggleFavorite(note.id, e);
-                        }}
-                        className="text-warm-subtle hover:text-warm-accent p-1"
+                  {isSelectMode && (
+                    <div className="pt-0.5 shrink-0 animate-check-pop">
+                      <div
+                        className={`w-5 h-5 rounded-full flex items-center justify-center border transition-all ${
+                          isSelected
+                            ? 'bg-warm-accent border-warm-accent text-white'
+                            : 'border-warm-subtle bg-transparent'
+                        }`}
                       >
-                        <span
-                          className={`material-symbols-outlined text-[18px] ${
-                            note.is_favorite ? 'text-warm-accent' : ''
-                          }`}
-                          style={{ fontVariationSettings: note.is_favorite ? "'FILL' 1" : "'FILL' 0" }}
-                        >
-                          bookmark
-                        </span>
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          triggerHaptic('medium');
-                          if (window.confirm(t('delete_confirm'))) {
-                            onDeleteNote(note.id);
-                          }
-                        }}
-                        className="text-warm-subtle hover:text-red-600 p-1"
-                      >
-                        <span className="material-symbols-outlined text-[17px]">delete</span>
-                      </button>
+                        {isSelected && (
+                          <span className="material-symbols-outlined text-[14px] font-bold">check</span>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                  {snippet && (
-                    <p className="text-sm text-warm-muted leading-relaxed line-clamp-2">
-                      {snippet}
-                    </p>
                   )}
-                  <div className="flex items-center gap-2 mt-0.5 text-xs text-warm-muted">
-                    <span className="font-medium text-warm-accent uppercase text-[10px]">
-                      {categoryObj ? categoryObj.name : note.category}
-                    </span>
-                    <span>•</span>
-                    <span className="text-[11px] font-mono text-warm-subtle">
-                      {formatRelativeTime(note.updated_at_str)}
-                    </span>
+
+                  <div className="flex-1 flex flex-col gap-1 min-w-0">
+                    <div className="flex items-baseline justify-between gap-3">
+                      <h4 className="text-base font-semibold text-warm-text leading-snug truncate">
+                        {note.title || t('title_placeholder')}
+                      </h4>
+                      {!isSelectMode && (
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              triggerHaptic();
+                              onToggleFavorite(note.id, e);
+                            }}
+                            className="w-7 h-7 flex items-center justify-center rounded-full text-warm-subtle hover:text-warm-accent hover:bg-cream-surface transition-colors"
+                          >
+                            <span
+                              className={`material-symbols-outlined text-[18px] ${
+                                note.is_favorite ? 'text-warm-accent' : ''
+                              }`}
+                              style={{ fontVariationSettings: note.is_favorite ? "'FILL' 1" : "'FILL' 0" }}
+                            >
+                              bookmark
+                            </span>
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              triggerHaptic('medium');
+                              if (window.confirm(t('delete_confirm'))) {
+                                onDeleteNote(note.id);
+                              }
+                            }}
+                            className="w-7 h-7 flex items-center justify-center rounded-full text-warm-subtle hover:text-red-600 hover:bg-cream-surface transition-colors"
+                          >
+                            <span className="material-symbols-outlined text-[17px]">delete</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    {snippet && (
+                      <p className="text-sm text-warm-muted leading-relaxed line-clamp-2">
+                        {snippet}
+                      </p>
+                    )}
+                    <div className="flex items-center gap-2 mt-0.5 text-xs text-warm-muted">
+                      <span className="font-medium text-warm-accent uppercase text-[10px]">
+                        {categoryObj ? categoryObj.name : note.category}
+                      </span>
+                      <span>•</span>
+                      <span className="text-[11px] font-mono text-warm-subtle">
+                        {formatRelativeTime(note.updated_at_str)}
+                      </span>
+                    </div>
                   </div>
                 </article>
               );
@@ -246,68 +337,6 @@ export const HomeView: React.FC<HomeViewProps> = ({
           </section>
         )}
       </div>
-
-      {actionSheetNote && (
-        <div
-          onClick={() => setActionSheetNote(null)}
-          className="fixed inset-0 z-50 bg-black/40 flex items-end justify-center animate-page-fade"
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-[420px] bg-[#FAF8F5] rounded-t-2xl p-5 flex flex-col gap-2.5 pb-8 shadow-2xl"
-          >
-            <div className="w-10 h-1 rounded-full bg-cream-divider mx-auto mb-1" />
-            <h3 className="text-sm font-semibold text-warm-text truncate px-1">
-              {actionSheetNote.title || t('title_placeholder')}
-            </h3>
-
-            <button
-              onClick={() => {
-                const target = actionSheetNote;
-                setActionSheetNote(null);
-                onOpenNote(target);
-              }}
-              className="w-full py-3 rounded-xl bg-cream-surface flex items-center justify-center gap-2 text-sm font-medium text-warm-text physics-bounce"
-            >
-              <span className="material-symbols-outlined text-[18px]">edit</span>
-              <span>{t('action_open')}</span>
-            </button>
-
-            <button
-              onClick={(e) => {
-                const target = actionSheetNote;
-                setActionSheetNote(null);
-                onToggleFavorite(target.id, e);
-              }}
-              className="w-full py-3 rounded-xl bg-cream-surface flex items-center justify-center gap-2 text-sm font-medium text-warm-text physics-bounce"
-            >
-              <span className="material-symbols-outlined text-[18px]">bookmark</span>
-              <span>{actionSheetNote.is_favorite ? t('action_unfavorite') : t('action_favorite')}</span>
-            </button>
-
-            <button
-              onClick={() => {
-                const targetId = actionSheetNote.id;
-                setActionSheetNote(null);
-                if (window.confirm(t('delete_confirm'))) {
-                  onDeleteNote(targetId);
-                }
-              }}
-              className="w-full py-3 rounded-xl bg-red-50 text-red-600 flex items-center justify-center gap-2 text-sm font-medium physics-bounce"
-            >
-              <span className="material-symbols-outlined text-[18px]">delete</span>
-              <span>{t('delete_note')}</span>
-            </button>
-
-            <button
-              onClick={() => setActionSheetNote(null)}
-              className="w-full py-2.5 text-center text-xs text-warm-muted font-medium mt-1"
-            >
-              {t('action_cancel')}
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

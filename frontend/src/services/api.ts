@@ -56,6 +56,23 @@ export async function deleteNoteApi(id: string): Promise<boolean> {
   }
 }
 
+export async function deleteNotesBatchApi(ids: string[]): Promise<boolean> {
+  try {
+    const response = await fetch(`${API_BASE}/api/notes/delete`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: getAuthHeader(),
+      },
+      body: JSON.stringify({ ids }),
+    });
+    return response.ok;
+  } catch (error) {
+    console.error(`API_CLIENT_ERROR deleteNotesBatchApi: ${(error as Error).message}`);
+    return false;
+  }
+}
+
 export async function createTopicApi(topic: TopicItem): Promise<boolean> {
   try {
     const response = await fetch(`${API_BASE}/api/topics`, {

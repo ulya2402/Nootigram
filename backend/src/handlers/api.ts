@@ -113,9 +113,17 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
 
   if (request.method === 'POST' && path === '/api/notes/delete') {
     try {
-      const body = (await request.json()) as { id: string };
-      await env.DB.prepare('DELETE FROM notes WHERE id = ? AND telegram_id = ?').bind(body.id, userId).run();
-      console.log(`NOTE_DELETED_SUCCESS: note_id=${body.id}, user=${userId}`);
+      const body = (await request.json()) as { id?: string; ids?: string[] };
+      if (body.ids && Array.isArray(body.ids) && body.ids.length > 0) {
+        const statements = body.ids.map((nId) =>
+          env.DB.prepare('DELETE FROM notes WHERE id = ? AND telegram_id = ?').bind(nId, userId)
+        );
+        await env.DB.batch(statements);
+        console.log(`BATCH_NOTES_DELETED_SUCCESS: count=${body.ids.length}, user=${userId}`);
+      } else if (body.id) {
+        await env.DB.prepare('DELETE FROM notes WHERE id = ? AND telegram_id = ?').bind(body.id, userId).run();
+        console.log(`NOTE_DELETED_SUCCESS: note_id=${body.id}, user=${userId}`);
+      }
 
       return new Response(JSON.stringify({ success: true }), {
         headers: { 'Content-Type': 'application/json' },

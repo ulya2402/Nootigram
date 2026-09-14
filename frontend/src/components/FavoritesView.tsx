@@ -1,6 +1,7 @@
 import React from 'react';
 import { NoteItem, TopicItem } from '../types';
 import { t } from '../services/i18n';
+import { formatRelativeTime } from '../utils/date';
 
 interface FavoritesViewProps {
   notes: NoteItem[];
@@ -28,12 +29,15 @@ export const FavoritesView: React.FC<FavoritesViewProps> = ({
 
   return (
     <div className="flex flex-col w-full px-6 safe-bottom-space animate-page-fade">
-      <section className="pt-2 pb-4 text-center border-b border-cream-divider">
-        <h2 className="text-xl font-semibold text-warm-text tracking-tight">
+      <section className="pt-2 pb-3 border-b border-cream-divider flex flex-col gap-1">
+        <span className="text-[10px] font-semibold text-warm-accent tracking-widest uppercase">
           {t('favorites_title')}
+        </span>
+        <h2 className="text-xl font-semibold text-warm-text tracking-tight">
+          {t('favorites_heading')}
         </h2>
-        <p className="text-xs text-warm-muted mt-0.5">
-          {t('total_notes', { count: favoriteNotes.length })}
+        <p className="text-xs text-warm-muted">
+          {t('favorites_sub', { count: favoriteNotes.length })}
         </p>
       </section>
 
@@ -61,11 +65,10 @@ export const FavoritesView: React.FC<FavoritesViewProps> = ({
                   <div className="flex items-center gap-2 shrink-0">
                     <button
                       onClick={(e) => onToggleFavorite(note.id, e)}
-                      className="text-warm-accent"
+                      className="text-warm-accent p-1"
                     >
                       <span className="material-symbols-outlined text-[18px]">bookmark</span>
                     </button>
-                    <span className="text-xs text-warm-subtle">{note.updated_at_str}</span>
                   </div>
                 </div>
                 {previewText && (
@@ -74,11 +77,13 @@ export const FavoritesView: React.FC<FavoritesViewProps> = ({
                   </p>
                 )}
                 <div className="flex items-center gap-2 mt-0.5 text-xs text-warm-muted">
-                  <span className="font-medium text-warm-accent uppercase text-[11px]">
+                  <span className="font-medium text-warm-accent uppercase text-[10px]">
                     {categoryObj ? categoryObj.name : note.category}
                   </span>
                   <span>•</span>
-                  <span>{note.blocks.length} blok</span>
+                  <span className="text-[11px] font-mono text-warm-subtle">
+                    {formatRelativeTime(note.updated_at_str)}
+                  </span>
                 </div>
               </article>
             );

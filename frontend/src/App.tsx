@@ -4,7 +4,7 @@ import { NotebooksView } from './components/NotebooksView';
 import { FavoritesView } from './components/FavoritesView';
 import { EditorView } from './components/EditorView';
 import { NoteItem, TopicItem } from './types';
-import { fetchBootstrap, syncNotesBatch, deleteNoteApi, createTopicApi, deleteTopicApi } from './services/api';
+import { fetchBootstrap, syncNotesBatch, deleteNoteApi, deleteNotesBatchApi, createTopicApi, deleteTopicApi } from './services/api';
 import { setLanguage, t } from './services/i18n';
 
 let isTelegramBound = false;
@@ -162,6 +162,13 @@ export const App: React.FC = () => {
     deleteNoteApi(id);
   };
 
+  const handleBatchDeleteNotes = (ids: string[]) => {
+    const nextNotes = notes.filter((n) => !ids.includes(n.id));
+    setNotes(nextNotes);
+    localStorage.setItem('notigram_user_notes', JSON.stringify(nextNotes));
+    deleteNotesBatchApi(ids);
+  };
+
   const handleToggleFavorite = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     const nextNotes = notes.map((n) => (n.id === id ? { ...n, is_favorite: !n.is_favorite } : n));
@@ -226,12 +233,12 @@ export const App: React.FC = () => {
             {activeTab === 'notes' && (
               <HomeView
                 userName={userName}
-                userPhoto={userPhoto}
                 notes={notes}
                 topics={topics}
                 onOpenNote={handleOpenNote}
                 onToggleFavorite={handleToggleFavorite}
                 onDeleteNote={handleDeleteNote}
+                onBatchDeleteNotes={handleBatchDeleteNotes}
               />
             )}
             {activeTab === 'notebooks' && (
