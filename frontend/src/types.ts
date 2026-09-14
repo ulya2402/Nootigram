@@ -1,0 +1,84 @@
+export interface TableCell {
+  text: string;
+  is_header?: boolean;
+  align?: 'left' | 'center' | 'right';
+}
+
+export interface TaskItem {
+  id: string;
+  text: string;
+  is_checked: boolean;
+}
+
+export interface TopicItem {
+  id: string;
+  name: string;
+  is_default?: boolean;
+}
+
+export type ContentBlock =
+  | { id: string; type: 'paragraph'; text: string }
+  | { id: string; type: 'heading'; size: 2 | 3 | 4; text: string }
+  | { id: string; type: 'quote'; text: string; credit?: string }
+  | { id: string; type: 'list'; items: TaskItem[] }
+  | { id: string; type: 'table'; cells: TableCell[][] }
+  | { id: string; type: 'code'; text: string; language?: string }
+  | { id: string; type: 'math'; expression: string }
+  | { id: string; type: 'details'; summary: string; text: string }
+  | { id: string; type: 'divider' };
+
+export interface NoteItem {
+  id: string;
+  category: string;
+  title: string;
+  content_raw?: string;
+  blocks: ContentBlock[];
+  is_pinned: boolean;
+  is_favorite: boolean;
+  updated_at_str: string;
+}
+
+export interface TelegramWebApp {
+  initData: string;
+  initDataUnsafe: {
+    user?: {
+      id: number;
+      first_name: string;
+      last_name?: string;
+      username?: string;
+      language_code?: string;
+      photo_url?: string;
+    };
+  };
+  ready: () => void;
+  expand: () => void;
+  requestFullscreen?: () => void;
+  enableClosingConfirmation: () => void;
+  disableVerticalSwipes: () => void;
+  setHeaderColor: (color: string) => void;
+  setBackgroundColor: (color: string) => void;
+  onEvent: (eventType: string, eventHandler: () => void) => void;
+  offEvent: (eventType: string, eventHandler: () => void) => void;
+  BackButton: {
+    isVisible: boolean;
+    show: () => void;
+    hide: () => void;
+    onClick: (callback: () => void) => void;
+    offClick: (callback: () => void) => void;
+  };
+  HapticFeedback: {
+    impactOccurred: (style: 'light' | 'medium' | 'heavy' | 'rigid' | 'soft') => void;
+    notificationOccurred: (type: 'error' | 'success' | 'warning') => void;
+    selectionChanged: () => void;
+  };
+  safeAreaInset?: { top: number; bottom: number; left: number; right: number };
+  contentSafeAreaInset?: { top: number; bottom: number; left: number; right: number };
+}
+
+declare global {
+  interface Window {
+    Telegram?: {
+      WebApp: TelegramWebApp;
+    };
+  }
+}

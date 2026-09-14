@@ -1,0 +1,13 @@
+name = "notigram-backend"
+main = "src/index.ts"
+compatibility_date = "2024-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "notigram-db"
+database_id = "0df2bc80-18ee-4bb7-8dd0-12a9a1a83027"
+
+[vars]
+ENVIRONMENT = "production"
+WEBAPP_URL = "https://notigram-app.pages.dev"
