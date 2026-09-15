@@ -1,5 +1,13 @@
 import { InputRichMessage } from '../types';
 
+export interface TelegramSendResult {
+  ok: boolean;
+  errorCode?: number;
+  description?: string;
+}
+
+let cachedBotUsername = '';
+
 export class TelegramService {
   private readonly baseUrl: string;
 
@@ -7,7 +15,27 @@ export class TelegramService {
     this.baseUrl = `https://api.telegram.org/bot${this.token}`;
   }
 
-  async sendMessage(chatId: number | string, text: string, replyMarkup?: Record<string, unknown>, parseMode?: string): Promise<boolean> {
+  async getBotUsername(): Promise<string> {
+    if (cachedBotUsername) return cachedBotUsername;
+    try {
+      const response = await fetch(`${this.baseUrl}/getMe`);
+      const data = (await response.json()) as { ok: boolean; result?: { username?: string } };
+      if (data.ok && data.result?.username) {
+        cachedBotUsername = data.result.username;
+        return cachedBotUsername;
+      }
+    } catch (error) {
+      console.error(`TELEGRAM_GET_ME_FAILED: ${(error as Error).message}`);
+    }
+    return '';
+  }
+
+  async sendMessage(
+    chatId: number | string,
+    text: string,
+    replyMarkup?: Record<string, unknown>,
+    parseMode?: string
+  ): Promise<TelegramSendResult> {
     try {
       const response = await fetch(`${this.baseUrl}/sendMessage`, {
         method: 'POST',
@@ -19,18 +47,18 @@ export class TelegramService {
           reply_markup: replyMarkup,
         }),
       });
-      const data = (await response.json()) as { ok: boolean; description?: string };
+      const data = (await response.json()) as { ok: boolean; error_code?: number; description?: string };
       if (!data.ok) {
-        console.error(`TELEGRAM_API_ERROR sendMessage: ${data.description}`);
+        console.error(`TELEGRAM_API_ERROR sendMessage: code=${data.error_code} desc=${data.description}`);
       }
-      return data.ok;
+      return { ok: data.ok, errorCode: data.error_code, description: data.description };
     } catch (error) {
       console.error(`TELEGRAM_FETCH_FAILED sendMessage: ${(error as Error).message}`);
-      return false;
+      return { ok: false, description: (error as Error).message };
     }
   }
 
-  async sendRichMessage(chatId: number | string, richMessage: InputRichMessage): Promise<boolean> {
+  async sendRichMessage(chatId: number | string, richMessage: InputRichMessage): Promise<TelegramSendResult> {
     try {
       const response = await fetch(`${this.baseUrl}/sendRichMessage`, {
         method: 'POST',
@@ -40,12 +68,15 @@ export class TelegramService {
           rich_message: richMessage,
         }),
       });
-      const data = (await response.json()) as { ok: boolean; description?: string };
+      const data = (await response.json()) as { ok: boolean; error_code?: number; description?: string };
       if (data.ok) {
-        return true;
+        return { ok: true };
       }
-
-      console.error(`TELEGRAM_RICH_MESSAGE_FAILED: ${data.description}, falling back to standard message`);
+      if (data.error_code === 403) {
+        console.error(`TELEGRAM_PERMISSION_DENIED: User ${chatId} has not initiated conversation with bot`);
+        return { ok: false, errorCode: 403, description: data.description };
+      }
+      console.error(`TELEGRAM_RICH_MESSAGE_FAILED: ${data.description}, falling back to markdown`);
       return this.sendFallbackMarkdown(chatId, richMessage);
     } catch (error) {
       console.error(`TELEGRAM_RICH_MESSAGE_EXCEPTION: ${(error as Error).message}`);
@@ -53,7 +84,7 @@ export class TelegramService {
     }
   }
 
-  private async sendFallbackMarkdown(chatId: number | string, richMessage: InputRichMessage): Promise<boolean> {
+  private async sendFallbackMarkdown(chatId: number | string, richMessage: InputRichMessage): Promise<TelegramSendResult> {
     let md = '';
     if (richMessage.markdown) {
       md = richMessage.markdown;
@@ -84,7 +115,7 @@ export class TelegramService {
         } else if (b.type === 'list') {
           for (const item of b.items) {
             const itemText = item.blocks && item.blocks[0] && 'text' in item.blocks[0] ? (item.blocks[0] as any).text : '';
-            md += `${item.has_checkbox ? (item.is_checked ? '☑ ' : '☐ ') : '• '}${itemText}\n`;
+            md += `${item.has_checkbox ? (item.is_checked ? '✅ ' : '⬜ ') : '• '}${itemText}\n`;
           }
           md += '\n';
         } else if (b.type === 'details') {
@@ -93,11 +124,9 @@ export class TelegramService {
         }
       }
     }
-
     if (!md.trim()) {
       md = 'Empty note';
     }
-
     return this.sendMessage(chatId, md, undefined, 'Markdown');
   }
 
@@ -125,11 +154,9 @@ export class TelegramService {
       const params = new URLSearchParams(initData);
       const hash = params.get('hash');
       if (!hash) return null;
-
       params.delete('hash');
       const keys = Array.from(params.keys()).sort();
       const checkString = keys.map((key) => `${key}=${params.get(key)}`).join('\n');
-
       const encoder = new TextEncoder();
       const secretKey = await crypto.subtle.importKey(
         'raw',
@@ -138,7 +165,6 @@ export class TelegramService {
         false,
         ['sign']
       );
-
       const secretHmac = await crypto.subtle.sign('HMAC', secretKey, encoder.encode(this.token));
       const keyForValidation = await crypto.subtle.importKey(
         'raw',
@@ -147,20 +173,16 @@ export class TelegramService {
         false,
         ['sign']
       );
-
       const validationHmac = await crypto.subtle.sign('HMAC', keyForValidation, encoder.encode(checkString));
       const expectedHash = Array.from(new Uint8Array(validationHmac))
         .map((byte) => byte.toString(16).padStart(2, '0'))
         .join('');
-
       if (expectedHash !== hash) {
         console.error('TELEGRAM_AUTH_VALIDATION_FAILED: Hash mismatch');
         return null;
       }
-
       const userJson = params.get('user');
       if (!userJson) return null;
-
       return JSON.parse(userJson) as Record<string, unknown>;
     } catch (error) {
       console.error(`TELEGRAM_AUTH_EXCEPTION: ${(error as Error).message}`);

@@ -31,6 +31,7 @@ export async function syncNotesBatch(notes: NoteItem[]): Promise<boolean> {
         Authorization: getAuthHeader(),
       },
       body: JSON.stringify({ notes }),
+      keepalive: true,
     });
     return response.ok;
   } catch (error) {
@@ -107,7 +108,7 @@ export async function deleteTopicApi(id: string): Promise<boolean> {
   }
 }
 
-export async function exportNoteToTelegram(note: NoteItem): Promise<boolean> {
+export async function exportNoteToTelegram(note: NoteItem): Promise<{ success: boolean; error?: string; bot_username?: string }> {
   try {
     const response = await fetch(`${API_BASE}/api/notes/export`, {
       method: 'POST',
@@ -117,10 +118,10 @@ export async function exportNoteToTelegram(note: NoteItem): Promise<boolean> {
       },
       body: JSON.stringify({ note_id: note.id, note }),
     });
-    const result = (await response.json()) as { success: boolean };
-    return Boolean(result.success);
+    const result = (await response.json()) as { success: boolean; error?: string; bot_username?: string };
+    return { success: Boolean(result.success), error: result.error, bot_username: result.bot_username };
   } catch (error) {
     console.error(`API_CLIENT_ERROR exportNoteToTelegram: ${(error as Error).message}`);
-    return false;
+    return { success: false, error: 'NETWORK_ERROR' };
   }
 }

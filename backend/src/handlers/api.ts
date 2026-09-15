@@ -19,17 +19,48 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
 
   const userId = authUser ? (authUser.id as number) : 123456789;
 
+  if (authUser) {
+    await env.DB.prepare(`
+      INSERT INTO users (telegram_id, language_code, first_name, last_name, username)
+      VALUES (?, 'en', ?, ?, ?)
+      ON CONFLICT(telegram_id) DO UPDATE SET
+        first_name = excluded.first_name,
+        last_name = excluded.last_name,
+        username = excluded.username,
+        updated_at = CURRENT_TIMESTAMP
+    `)
+      .bind(
+        userId,
+        (authUser.first_name as string) || '',
+        (authUser.last_name as string) || null,
+        (authUser.username as string) || null
+      )
+      .run();
+  }
+
   if (request.method === 'GET' && path === '/api/notes') {
     try {
-      const [userRow, topicRows, noteRows] = await Promise.all([
-        env.DB.prepare('SELECT language_code FROM users WHERE telegram_id = ?').bind(userId).first<{ language_code: string }>(),
-        env.DB.prepare('SELECT * FROM topics WHERE telegram_id = ? ORDER BY created_at ASC').bind(userId).all(),
-        env.DB.prepare('SELECT * FROM notes WHERE telegram_id = ? ORDER BY is_pinned DESC, updated_at DESC').bind(userId).all(),
+      const results = await env.DB.batch([
+        env.DB.prepare('SELECT language_code FROM users WHERE telegram_id = ?').bind(userId),
+        env.DB.prepare('SELECT id, name, is_default FROM topics WHERE telegram_id = ? ORDER BY created_at ASC').bind(userId),
+        env.DB.prepare('SELECT id, category, title, content_raw, blocks_json, is_pinned, updated_at FROM notes WHERE telegram_id = ? ORDER BY is_pinned DESC, updated_at DESC').bind(userId),
       ]);
 
-      let finalTopics = topicRows.results.map((t) => ({
-        id: t.id as string,
-        name: t.name as string,
+      const userRow = results[0].results[0] as { language_code?: string } | undefined;
+      const rawTopics = results[1].results as unknown as { id: string; name: string; is_default: number | boolean }[];
+      const rawNotes = results[2].results as unknown as {
+        id: string;
+        category: string;
+        title: string;
+        content_raw: string;
+        blocks_json: string;
+        is_pinned: number | boolean;
+        updated_at: string;
+      }[];
+
+      let finalTopics = rawTopics.map((t) => ({
+        id: t.id,
+        name: t.name,
         is_default: Boolean(t.is_default),
       }));
 
@@ -44,22 +75,22 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
         ];
       }
 
-      const notes = noteRows.results.map((r) => ({
-        id: r.id as string,
-        category: r.category as string,
-        title: r.title as string,
-        content_raw: r.content_raw as string,
-        blocks: JSON.parse(r.blocks_json as string),
+      const notes = rawNotes.map((r) => ({
+        id: r.id,
+        category: r.category,
+        title: r.title,
+        content_raw: r.content_raw,
+        blocks: JSON.parse(r.blocks_json),
         is_pinned: Boolean(r.is_pinned),
         is_favorite: Boolean(r.is_pinned),
-        updated_at_str: r.updated_at as string,
+        updated_at_str: r.updated_at,
       }));
 
       return new Response(
         JSON.stringify({
           notes,
           topics: finalTopics,
-          language_code: userRow?.language_code || 'id',
+          language_code: userRow?.language_code || 'en',
         }),
         { headers: { 'Content-Type': 'application/json' } }
       );
@@ -203,9 +234,15 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
         blocks = JSON.parse(row.blocks_json as string);
       }
 
-      const success = await telegram.sendRichMessage(userId, { blocks });
+      const sendResult = await telegram.sendRichMessage(userId, { blocks });
+      if (!sendResult.ok && sendResult.errorCode === 403) {
+        const botUsername = await telegram.getBotUsername();
+        return new Response(JSON.stringify({ success: false, error: 'NEED_START_BOT', bot_username: botUsername }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
 
-      return new Response(JSON.stringify({ success }), {
+      return new Response(JSON.stringify({ success: sendResult.ok }), {
         headers: { 'Content-Type': 'application/json' },
       });
     } catch (error) {

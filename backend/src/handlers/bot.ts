@@ -16,19 +16,18 @@ export async function handleBotUpdate(update: TelegramUpdate, env: Env): Promise
         .first<{ telegram_id: number; language_code: string }>();
 
       if (!user) {
-        const preferredLang = message.from.language_code?.startsWith('id') ? 'id' : 'en';
         await env.DB.prepare(
           'INSERT INTO users (telegram_id, language_code, first_name, last_name, username) VALUES (?, ?, ?, ?, ?)'
         )
           .bind(
             userId,
-            preferredLang,
+            'en',
             message.from.first_name || '',
             message.from.last_name || null,
             message.from.username || null
           )
           .run();
-        user = { telegram_id: userId, language_code: preferredLang };
+        user = { telegram_id: userId, language_code: 'en' };
       }
 
       const lang = user.language_code;
@@ -71,10 +70,21 @@ export async function handleBotUpdate(update: TelegramUpdate, env: Env): Promise
 
       if (typeof data === 'string' && data.startsWith('set_lang_')) {
         const newLang = data.replace('set_lang_', '');
-        await env.DB.prepare('UPDATE users SET language_code = ?, updated_at = CURRENT_TIMESTAMP WHERE telegram_id = ?')
-          .bind(newLang, userId)
+        await env.DB.prepare(`
+          INSERT INTO users (telegram_id, language_code, first_name, last_name, username)
+          VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT(telegram_id) DO UPDATE SET
+            language_code = excluded.language_code,
+            updated_at = CURRENT_TIMESTAMP
+        `)
+          .bind(
+            userId,
+            newLang,
+            cq.from.first_name || '',
+            cq.from.last_name || null,
+            cq.from.username || null
+          )
           .run();
-
         await telegram.answerCallbackQuery(cq.id, t(newLang, 'lang_switched'));
         if (cq.message) {
           await telegram.sendMessage(cq.message.chat.id, t(newLang, 'lang_switched'));

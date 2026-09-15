@@ -23,11 +23,11 @@ export type ContentBlock =
   | { id: string; type: 'expandable_quote'; text: string; credit?: string }
   | { id: string; type: 'pullquote'; text: string; credit?: string }
   | { id: string; type: 'list'; style: 'task' | 'bullet' | 'ordered'; items: TaskItem[] }
-  | { 
-      id: string; 
-      type: 'table'; 
-      cells: TableCell[][]; 
-      is_bordered?: boolean; 
+  | {
+      id: string;
+      type: 'table';
+      cells: TableCell[][];
+      is_bordered?: boolean;
       is_striped?: boolean;
       is_compact?: boolean;
       caption?: string;
@@ -69,6 +69,8 @@ export interface TelegramWebApp {
   setBackgroundColor: (color: string) => void;
   onEvent: (eventType: string, eventHandler: () => void) => void;
   offEvent: (eventType: string, eventHandler: () => void) => void;
+  openTelegramLink: (url: string) => void;
+  requestWriteAccess: (callback?: (allowed: boolean) => void) => void;
   BackButton: {
     isVisible: boolean;
     show: () => void;

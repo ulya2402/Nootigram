@@ -30,5 +30,5 @@ CREATE TABLE IF NOT EXISTS notes (
     FOREIGN KEY (telegram_id) REFERENCES users(telegram_id) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_notes_user ON notes(telegram_id);
+CREATE INDEX IF NOT EXISTS idx_notes_user_updated ON notes(telegram_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_topics_user ON topics(telegram_id);

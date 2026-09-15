@@ -73,5 +73,12 @@
   "deselect_all": "Clear",
   "selected_count": "%count% Selected",
   "batch_delete_confirm": "Permanently delete %count% selected notes?",
-  "batch_delete": "Delete"
+  "batch_delete": "Delete",
+  "default_user_name": "Friend",
+  "table_cell": "Cell:",
+  "table_col": "Col:",
+  "bot_modal_title": "Activate Chat Bot",
+  "bot_modal_desc": "Telegram requires you to open the chat bot once so it has permission to send notes to your private chat.",
+  "bot_modal_later": "Later",
+  "bot_modal_open": "Open Chat Bot"
 }

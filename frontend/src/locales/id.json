@@ -73,5 +73,12 @@
   "deselect_all": "Batal",
   "selected_count": "%count% Dipilih",
   "batch_delete_confirm": "Hapus %count% catatan yang dipilih secara permanen?",
-  "batch_delete": "Hapus"
+  "batch_delete": "Hapus",
+  "default_user_name": "Teman",
+  "table_cell": "Sel:",
+  "table_col": "Kolom:",
+  "bot_modal_title": "Aktifkan Chat Bot",
+  "bot_modal_desc": "Telegram mewajibkan Anda membuka chat bot satu kali terlebih dahulu agar bot diizinkan mengirimkan catatan ke pesan pribadi Anda.",
+  "bot_modal_later": "Nanti",
+  "bot_modal_open": "Buka Chat Bot"
 }

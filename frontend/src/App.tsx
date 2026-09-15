@@ -1,23 +1,29 @@
-import React, { useEffect, useState, useTransition, useRef } from 'react';
+import React, { useEffect, useState, useTransition, useRef, useCallback } from 'react';
 import { HomeView } from './components/HomeView';
 import { NotebooksView } from './components/NotebooksView';
 import { FavoritesView } from './components/FavoritesView';
 import { EditorView } from './components/EditorView';
 import { NoteItem, TopicItem } from './types';
 import { fetchBootstrap, syncNotesBatch, deleteNoteApi, deleteNotesBatchApi, createTopicApi, deleteTopicApi } from './services/api';
-import { setLanguage, t } from './services/i18n';
-
+import { setLanguage, t, subscribeLanguage } from './services/i18n';
 let isTelegramBound = false;
 
 const DEFAULT_TOPICS: TopicItem[] = [
-  { id: 'ideas', name: 'Ide', is_default: true },
-  { id: 'projects', name: 'Proyek', is_default: true },
+  { id: 'ideas', name: 'Ideas', is_default: true },
+  { id: 'projects', name: 'Projects', is_default: true },
 ];
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'notes' | 'notebooks' | 'favorites'>('notes');
   const [activeView, setActiveView] = useState<'list' | 'editor'>('list');
   const [activeNote, setActiveNote] = useState<NoteItem | null>(null);
+  const [, setCurrentLang] = useState<string>(() => localStorage.getItem('notigram_lang') || 'en');
+
+  useEffect(() => {
+    return subscribeLanguage((lang: string) => {
+      setCurrentLang(lang);
+    });
+  }, []);
   const [notes, setNotes] = useState<NoteItem[]>(() => {
     const cached = localStorage.getItem('notigram_user_notes');
     return cached ? (JSON.parse(cached) as NoteItem[]) : [];
@@ -31,9 +37,24 @@ export const App: React.FC = () => {
   const [, startTransition] = useTransition();
   const rootRef = useRef<HTMLDivElement>(null);
 
+  const debounceTimerRef = useRef<number | null>(null);
+  const pendingNotesRef = useRef<Map<string, NoteItem>>(new Map());
+
   const triggerHaptic = (style: 'light' | 'medium' = 'light') => {
     window.Telegram?.WebApp?.HapticFeedback?.impactOccurred(style);
   };
+
+  const flushPendingSync = useCallback(() => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
+    if (pendingNotesRef.current.size > 0) {
+      const itemsToSync = Array.from(pendingNotesRef.current.values());
+      pendingNotesRef.current.clear();
+      syncNotesBatch(itemsToSync);
+    }
+  }, []);
 
   useEffect(() => {
     const handleViewport = () => {
@@ -42,10 +63,8 @@ export const App: React.FC = () => {
         document.documentElement.style.setProperty('--keyboard-inset', `${Math.max(0, offset)}px`);
       }
     };
-
     window.visualViewport?.addEventListener('resize', handleViewport);
     window.visualViewport?.addEventListener('scroll', handleViewport);
-
     return () => {
       window.visualViewport?.removeEventListener('resize', handleViewport);
       window.visualViewport?.removeEventListener('scroll', handleViewport);
@@ -63,31 +82,22 @@ export const App: React.FC = () => {
         tg.disableVerticalSwipes();
         tg.setHeaderColor('#FAF8F5');
         tg.setBackgroundColor('#FAF8F5');
-
         const user = tg.initDataUnsafe?.user;
         if (user) {
-          setUserName(user.first_name || 'Teman');
+          setUserName(user.first_name || t('default_user_name'));
           setUserPhoto(user.photo_url);
-          if (user.language_code?.startsWith('id')) {
-            setLanguage('id');
-          } else if (user.language_code?.startsWith('en')) {
-            setLanguage('en');
-          }
         }
-
         const applyInsets = () => {
           const root = document.documentElement.style;
           const sTop = tg.safeAreaInset?.top ?? 0;
           const sBottom = tg.safeAreaInset?.bottom ?? 0;
           const cTop = tg.contentSafeAreaInset?.top ?? 0;
           const cBottom = tg.contentSafeAreaInset?.bottom ?? 0;
-
           root.setProperty('--tg-safe-top', `${sTop}px`);
           root.setProperty('--tg-safe-bottom', `${sBottom}px`);
           root.setProperty('--tg-content-top', `${cTop}px`);
           root.setProperty('--tg-content-bottom', `${cBottom}px`);
         };
-
         applyInsets();
         tg.onEvent('safeAreaChanged', applyInsets);
         tg.onEvent('contentSafeAreaChanged', applyInsets);
@@ -98,22 +108,49 @@ export const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    fetchBootstrap().then((res) => {
-      if (res.language_code) {
-        setLanguage(res.language_code);
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        flushPendingSync();
       }
+    };
+    const handlePageHide = () => {
+      flushPendingSync();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('pagehide', handlePageHide);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('pagehide', handlePageHide);
+    };
+  }, [flushPendingSync]);
+
+  useEffect(() => {
+    fetchBootstrap().then((res) => {
+      setLanguage(res.language_code || 'en');
       if (res.topics && res.topics.length > 0) {
         setTopics(res.topics);
         localStorage.setItem('notigram_user_topics', JSON.stringify(res.topics));
       }
       if (res.notes) {
-        setNotes(res.notes);
-        localStorage.setItem('notigram_user_notes', JSON.stringify(res.notes));
+        setNotes((currentLocalNotes) => {
+          const remoteIds = new Set(res.notes.map((n) => n.id));
+          const unsyncedNotes = currentLocalNotes.filter((n) => !remoteIds.has(n.id));
+          const mergedNotes = [...unsyncedNotes, ...res.notes];
+
+          localStorage.setItem('notigram_user_notes', JSON.stringify(mergedNotes));
+
+          if (unsyncedNotes.length > 0) {
+            syncNotesBatch(unsyncedNotes);
+          }
+          return mergedNotes;
+        });
       }
     });
   }, []);
 
   const handleOpenNote = (note: NoteItem) => {
+    flushPendingSync();
     startTransition(() => {
       setActiveNote(note);
       setActiveView('editor');
@@ -121,6 +158,7 @@ export const App: React.FC = () => {
   };
 
   const handleCreateNote = () => {
+    flushPendingSync();
     const newNote: NoteItem = {
       id: `note-${Date.now()}`,
       category: topics[0]?.id || 'ideas',
@@ -145,13 +183,20 @@ export const App: React.FC = () => {
   const handleSaveNote = (updated: NoteItem) => {
     const exists = notes.some((n) => n.id === updated.id);
     const nextNotes = exists ? notes.map((n) => (n.id === updated.id ? updated : n)) : [updated, ...notes];
-
     setNotes(nextNotes);
     localStorage.setItem('notigram_user_notes', JSON.stringify(nextNotes));
-    syncNotesBatch([updated]);
+
+    pendingNotesRef.current.set(updated.id, updated);
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    debounceTimerRef.current = window.setTimeout(() => {
+      flushPendingSync();
+    }, 1200);
   };
 
   const handleDeleteNote = (id: string) => {
+    pendingNotesRef.current.delete(id);
     const nextNotes = notes.filter((n) => n.id !== id);
     setNotes(nextNotes);
     localStorage.setItem('notigram_user_notes', JSON.stringify(nextNotes));
@@ -163,6 +208,7 @@ export const App: React.FC = () => {
   };
 
   const handleBatchDeleteNotes = (ids: string[]) => {
+    ids.forEach((id) => pendingNotesRef.current.delete(id));
     const nextNotes = notes.filter((n) => !ids.includes(n.id));
     setNotes(nextNotes);
     localStorage.setItem('notigram_user_notes', JSON.stringify(nextNotes));
@@ -175,7 +221,13 @@ export const App: React.FC = () => {
     setNotes(nextNotes);
     localStorage.setItem('notigram_user_notes', JSON.stringify(nextNotes));
     const target = nextNotes.find((n) => n.id === id);
-    if (target) syncNotesBatch([target]);
+    if (target) {
+      pendingNotesRef.current.set(target.id, target);
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = window.setTimeout(() => {
+        flushPendingSync();
+      }, 1000);
+    }
   };
 
   const handleAddTopic = (name: string) => {
@@ -222,6 +274,7 @@ export const App: React.FC = () => {
             note={activeNote}
             topics={topics}
             onBack={() => {
+              flushPendingSync();
               triggerHaptic();
               setActiveView('list');
             }}
