@@ -13,6 +13,12 @@ const DEFAULT_TOPICS: TopicItem[] = [
   { id: 'projects', name: 'Projects', is_default: true },
 ];
 
+const NAV_TABS = [
+  { id: 'notes', icon: 'note_stack', labelKey: 'notes_title' },
+  { id: 'notebooks', icon: 'folder', labelKey: 'notebooks_title' },
+  { id: 'favorites', icon: 'bookmark', labelKey: 'favorites_title' },
+] as const;
+
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'notes' | 'notebooks' | 'favorites'>('notes');
   const [activeView, setActiveView] = useState<'list' | 'editor'>('list');
@@ -80,7 +86,7 @@ export const App: React.FC = () => {
         tg.expand();
         tg.enableClosingConfirmation();
         tg.disableVerticalSwipes();
-        tg.setHeaderColor('#FAF8F5');
+        tg.setHeaderColor('#8A5122');
         tg.setBackgroundColor('#FAF8F5');
         const user = tg.initDataUnsafe?.user;
         if (user) {
@@ -315,59 +321,46 @@ export const App: React.FC = () => {
         )}
       </div>
 
-      {activeView === 'list' && activeTab === 'notes' && (
-        <div className="fixed bottom-20 right-6 z-40 max-w-[420px] pointer-events-auto">
-          <button
-            onClick={() => {
-              triggerHaptic('medium');
-              handleCreateNote();
-            }}
-            className="flex items-center gap-1.5 pl-4 pr-5 py-2.5 rounded-full bg-warm-text text-[#FAF8F5] shadow-lg physics-bounce"
-          >
-            <span className="material-symbols-outlined text-[19px]">edit</span>
-            <span className="text-xs font-semibold tracking-wide">{t('write')}</span>
-          </button>
-        </div>
-      )}
-
-      {activeView === 'list' && (
-        <nav className="fixed bottom-4 inset-x-0 z-50 flex justify-center px-6 pointer-events-none max-w-[420px] mx-auto animate-page-fade">
-          <div className="pointer-events-auto flex items-center gap-1 p-1 rounded-full bg-[#FAF8F5] border border-cream-divider shadow-[0_8px_24px_rgba(40,30,20,0.08)]">
+     {activeView === 'list' && (
+        <nav
+          className="fixed inset-x-0 z-50 flex justify-center px-4 pointer-events-none max-w-[420px] mx-auto select-none"
+          style={{
+            bottom: 'calc(max(var(--tg-content-bottom, 0px), var(--tg-safe-bottom, 0px), env(safe-area-inset-bottom, 0px)) + 14px)',
+          }}
+        >
+          <div className="pointer-events-auto flex items-center p-1 rounded-full bg-cream-surface border border-cream-divider">
+            {NAV_TABS.map((tab) => {
+              const isActive = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => {
+                    triggerHaptic('light');
+                    setActiveTab(tab.id);
+                  }}
+                  className={`flex items-center justify-center w-11 h-10 rounded-full transition-colors duration-150 active:opacity-60 ${
+                    isActive
+                      ? 'bg-warm-accent text-[#FAF8F5]'
+                      : 'text-warm-muted hover:text-warm-text'
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-[20px] leading-none">
+                    {tab.icon}
+                  </span>
+                </button>
+              );
+            })}
+            <div className="w-[1px] h-4 bg-cream-divider mx-1" />
             <button
               onClick={() => {
-                triggerHaptic();
-                setActiveTab('notes');
+                triggerHaptic('medium');
+                handleCreateNote();
               }}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-full min-h-[38px] transition-all duration-200 physics-bounce ${
-                activeTab === 'notes' ? 'bg-warm-text text-[#FAF8F5]' : 'text-warm-muted'
-              }`}
+              className="flex items-center justify-center w-10 h-10 rounded-full bg-warm-text text-[#FAF8F5] ml-0.5 active:opacity-70"
             >
-              <span className="material-symbols-outlined text-[18px]">note_stack</span>
-              {activeTab === 'notes' && <span className="text-xs font-semibold">{t('notes_title')}</span>}
-            </button>
-            <button
-              onClick={() => {
-                triggerHaptic();
-                setActiveTab('notebooks');
-              }}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-full min-h-[38px] transition-all duration-200 physics-bounce ${
-                activeTab === 'notebooks' ? 'bg-warm-text text-[#FAF8F5]' : 'text-warm-muted'
-              }`}
-            >
-              <span className="material-symbols-outlined text-[18px]">folder</span>
-              {activeTab === 'notebooks' && <span className="text-xs font-medium">{t('notebooks_title')}</span>}
-            </button>
-            <button
-              onClick={() => {
-                triggerHaptic();
-                setActiveTab('favorites');
-              }}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-full min-h-[38px] transition-all duration-200 physics-bounce ${
-                activeTab === 'favorites' ? 'bg-warm-text text-[#FAF8F5]' : 'text-warm-muted'
-              }`}
-            >
-              <span className="material-symbols-outlined text-[18px]">bookmark</span>
-              {activeTab === 'favorites' && <span className="text-xs font-medium">{t('favorites_title')}</span>}
+              <span className="material-symbols-outlined text-[18px] leading-none">
+                edit
+              </span>
             </button>
           </div>
         </nav>
