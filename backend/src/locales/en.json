@@ -1,8 +1,8 @@
 {
-  "bot_welcome": "Welcome to Notigram, %name%.\n\nA distraction-free sanctuary for your thoughts, deep reflections, and telegram rich notes.",
-  "open_app": "Open Notigram App",
-  "lang_switched": "Language changed successfully to English.",
-  "select_lang": "Please select your preferred language below:",
-  "export_success": "Note successfully exported to chat.",
-  "export_failed": "Failed to send Rich Message."
+  "bot_welcome": "👋 Welcome to Nootigram, %name%! A chill place to jot down ideas, capture your thoughts, and send your notes as rich text right on Telegram.",
+  "open_app": "Open Nootigram",
+  "lang_switched": "Display language has been changed to English.",
+  "select_lang": "Choose your display language below:",
+  "export_success": "Your note has been sent to Telegram.",
+  "export_failed": "Failed to send the rich text message."
 }

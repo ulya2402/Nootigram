@@ -1,8 +1,8 @@
 {
-  "bot_welcome": "Selamat datang di Notigram, %name%.\n\nRuang hening untuk merajut pikiran, menangkap renungan, dan mengekspor rich text telegram.",
-  "open_app": "Buka Aplikasi Notigram",
+  "bot_welcome": "👋 Selamat datang di Nootigram, %name%! Tempat santai buat nyatet ide, menuangkan pikiran, dan mengirim catatanmu dalam format rich text langsung ke Telegram.",
+  "open_app": "Buka Aplikasi Nootigram",
   "lang_switched": "Bahasa tampilan berhasil diubah ke Bahasa Indonesia.",
   "select_lang": "Pilih bahasa tampilan Anda di bawah ini:",
-  "export_success": "Catatan berhasil diekspor ke ruang pesan Telegram.",
+  "export_success": "Catatan berhasil diekspor ke Telegram.",
   "export_failed": "Gagal mengirim pesan Rich Message."
 }
