@@ -19,31 +19,12 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
 
   const userId = authUser ? (authUser.id as number) : 123456789;
 
-  if (authUser) {
-    await env.DB.prepare(`
-      INSERT INTO users (telegram_id, language_code, first_name, last_name, username)
-      VALUES (?, 'en', ?, ?, ?)
-      ON CONFLICT(telegram_id) DO UPDATE SET
-        first_name = excluded.first_name,
-        last_name = excluded.last_name,
-        username = excluded.username,
-        updated_at = CURRENT_TIMESTAMP
-    `)
-      .bind(
-        userId,
-        (authUser.first_name as string) || '',
-        (authUser.last_name as string) || null,
-        (authUser.username as string) || null
-      )
-      .run();
-  }
-
   if (request.method === 'GET' && path === '/api/notes') {
     try {
       const results = await env.DB.batch([
         env.DB.prepare('SELECT language_code FROM users WHERE telegram_id = ?').bind(userId),
         env.DB.prepare('SELECT id, name, is_default FROM topics WHERE telegram_id = ? ORDER BY created_at ASC').bind(userId),
-        env.DB.prepare('SELECT id, category, title, content_raw, blocks_json, is_pinned, updated_at FROM notes WHERE telegram_id = ? ORDER BY is_pinned DESC, updated_at DESC').bind(userId),
+        env.DB.prepare("SELECT id, category, title, content_raw, blocks_json, is_pinned, strftime('%Y-%m-%dT%H:%M:%SZ', updated_at) AS updated_at FROM notes WHERE telegram_id = ? ORDER BY is_pinned DESC, updated_at DESC").bind(userId),
       ]);
 
       const userRow = results[0].results[0] as { language_code?: string } | undefined;

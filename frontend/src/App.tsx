@@ -6,6 +6,7 @@ import { EditorView } from './components/EditorView';
 import { NoteItem, TopicItem } from './types';
 import { fetchBootstrap, syncNotesBatch, deleteNoteApi, deleteNotesBatchApi, createTopicApi, deleteTopicApi } from './services/api';
 import { setLanguage, t, subscribeLanguage } from './services/i18n';
+
 let isTelegramBound = false;
 
 const DEFAULT_TOPICS: TopicItem[] = [
@@ -19,6 +20,11 @@ const NAV_TABS = [
   { id: 'favorites', icon: 'bookmark', labelKey: 'favorites_title' },
 ] as const;
 
+const getStorageKey = (prefix: string): string => {
+  const userId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id;
+  return userId ? `${prefix}_${userId}` : `${prefix}_guest`;
+};
+
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'notes' | 'notebooks' | 'favorites'>('notes');
   const [activeView, setActiveView] = useState<'list' | 'editor'>('list');
@@ -30,19 +36,21 @@ export const App: React.FC = () => {
       setCurrentLang(lang);
     });
   }, []);
+
   const [notes, setNotes] = useState<NoteItem[]>(() => {
-    const cached = localStorage.getItem('notigram_user_notes');
+    const cached = localStorage.getItem(getStorageKey('notigram_user_notes'));
     return cached ? (JSON.parse(cached) as NoteItem[]) : [];
   });
+
   const [topics, setTopics] = useState<TopicItem[]>(() => {
-    const cached = localStorage.getItem('notigram_user_topics');
+    const cached = localStorage.getItem(getStorageKey('notigram_user_topics'));
     return cached ? (JSON.parse(cached) as TopicItem[]) : DEFAULT_TOPICS;
   });
+
   const [userName, setUserName] = useState<string>('Teman');
   const [userPhoto, setUserPhoto] = useState<string | undefined>(undefined);
   const [, startTransition] = useTransition();
   const rootRef = useRef<HTMLDivElement>(null);
-
   const debounceTimerRef = useRef<number | null>(null);
   const pendingNotesRef = useRef<Map<string, NoteItem>>(new Map());
 
@@ -122,7 +130,6 @@ export const App: React.FC = () => {
     const handlePageHide = () => {
       flushPendingSync();
     };
-
     document.addEventListener('visibilitychange', handleVisibility);
     window.addEventListener('pagehide', handlePageHide);
     return () => {
@@ -136,16 +143,14 @@ export const App: React.FC = () => {
       setLanguage(res.language_code || 'en');
       if (res.topics && res.topics.length > 0) {
         setTopics(res.topics);
-        localStorage.setItem('notigram_user_topics', JSON.stringify(res.topics));
+        localStorage.setItem(getStorageKey('notigram_user_topics'), JSON.stringify(res.topics));
       }
       if (res.notes) {
         setNotes((currentLocalNotes) => {
           const remoteIds = new Set(res.notes.map((n) => n.id));
           const unsyncedNotes = currentLocalNotes.filter((n) => !remoteIds.has(n.id));
           const mergedNotes = [...unsyncedNotes, ...res.notes];
-
-          localStorage.setItem('notigram_user_notes', JSON.stringify(mergedNotes));
-
+          localStorage.setItem(getStorageKey('notigram_user_notes'), JSON.stringify(mergedNotes));
           if (unsyncedNotes.length > 0) {
             syncNotesBatch(unsyncedNotes);
           }
@@ -190,8 +195,7 @@ export const App: React.FC = () => {
     const exists = notes.some((n) => n.id === updated.id);
     const nextNotes = exists ? notes.map((n) => (n.id === updated.id ? updated : n)) : [updated, ...notes];
     setNotes(nextNotes);
-    localStorage.setItem('notigram_user_notes', JSON.stringify(nextNotes));
-
+    localStorage.setItem(getStorageKey('notigram_user_notes'), JSON.stringify(nextNotes));
     pendingNotesRef.current.set(updated.id, updated);
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
@@ -205,7 +209,7 @@ export const App: React.FC = () => {
     pendingNotesRef.current.delete(id);
     const nextNotes = notes.filter((n) => n.id !== id);
     setNotes(nextNotes);
-    localStorage.setItem('notigram_user_notes', JSON.stringify(nextNotes));
+    localStorage.setItem(getStorageKey('notigram_user_notes'), JSON.stringify(nextNotes));
     if (activeNote?.id === id) {
       setActiveView('list');
       setActiveNote(null);
@@ -217,7 +221,7 @@ export const App: React.FC = () => {
     ids.forEach((id) => pendingNotesRef.current.delete(id));
     const nextNotes = notes.filter((n) => !ids.includes(n.id));
     setNotes(nextNotes);
-    localStorage.setItem('notigram_user_notes', JSON.stringify(nextNotes));
+    localStorage.setItem(getStorageKey('notigram_user_notes'), JSON.stringify(nextNotes));
     deleteNotesBatchApi(ids);
   };
 
@@ -225,7 +229,7 @@ export const App: React.FC = () => {
     e.stopPropagation();
     const nextNotes = notes.map((n) => (n.id === id ? { ...n, is_favorite: !n.is_favorite } : n));
     setNotes(nextNotes);
-    localStorage.setItem('notigram_user_notes', JSON.stringify(nextNotes));
+    localStorage.setItem(getStorageKey('notigram_user_notes'), JSON.stringify(nextNotes));
     const target = nextNotes.find((n) => n.id === id);
     if (target) {
       pendingNotesRef.current.set(target.id, target);
@@ -240,14 +244,14 @@ export const App: React.FC = () => {
     const newTopic: TopicItem = { id: `top-${Date.now()}`, name, is_default: false };
     const nextTopics = [...topics, newTopic];
     setTopics(nextTopics);
-    localStorage.setItem('notigram_user_topics', JSON.stringify(nextTopics));
+    localStorage.setItem(getStorageKey('notigram_user_topics'), JSON.stringify(nextTopics));
     createTopicApi(newTopic);
   };
 
   const handleDeleteTopic = (id: string) => {
     const nextTopics = topics.filter((tItem) => tItem.id !== id);
     setTopics(nextTopics);
-    localStorage.setItem('notigram_user_topics', JSON.stringify(nextTopics));
+    localStorage.setItem(getStorageKey('notigram_user_topics'), JSON.stringify(nextTopics));
     deleteTopicApi(id);
   };
 
@@ -273,7 +277,6 @@ export const App: React.FC = () => {
           </div>
         </header>
       )}
-
       <div className="scroll-container">
         {activeView === 'editor' && activeNote ? (
           <EditorView
@@ -320,8 +323,7 @@ export const App: React.FC = () => {
           </>
         )}
       </div>
-
-     {activeView === 'list' && (
+      {activeView === 'list' && (
         <nav
           className="fixed inset-x-0 z-50 flex justify-center px-4 pointer-events-none max-w-[420px] mx-auto select-none"
           style={{

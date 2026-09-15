@@ -67,27 +67,31 @@ export async function handleBotUpdate(update: TelegramUpdate, env: Env): Promise
       const cq = update.callback_query;
       const userId = cq.from.id;
       const data = cq.data;
-
       if (typeof data === 'string' && data.startsWith('set_lang_')) {
         const newLang = data.replace('set_lang_', '');
-        await env.DB.prepare(`
-          INSERT INTO users (telegram_id, language_code, first_name, last_name, username)
-          VALUES (?, ?, ?, ?, ?)
-          ON CONFLICT(telegram_id) DO UPDATE SET
-            language_code = excluded.language_code,
-            updated_at = CURRENT_TIMESTAMP
-        `)
-          .bind(
-            userId,
-            newLang,
-            cq.from.first_name || '',
-            cq.from.last_name || null,
-            cq.from.username || null
-          )
-          .run();
-        await telegram.answerCallbackQuery(cq.id, t(newLang, 'lang_switched'));
-        if (cq.message) {
-          await telegram.sendMessage(cq.message.chat.id, t(newLang, 'lang_switched'));
+        try {
+          await env.DB.prepare(`
+            INSERT INTO users (telegram_id, language_code, first_name, last_name, username)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(telegram_id) DO UPDATE SET
+              language_code = excluded.language_code,
+              updated_at = CURRENT_TIMESTAMP
+          `)
+            .bind(
+              userId,
+              newLang,
+              cq.from.first_name || '',
+              cq.from.last_name || '',
+              cq.from.username || ''
+            )
+            .run();
+          await telegram.answerCallbackQuery(cq.id, t(newLang, 'lang_switched'));
+          if (cq.message?.chat?.id) {
+            await telegram.sendMessage(cq.message.chat.id, t(newLang, 'lang_switched'));
+          }
+        } catch (error) {
+          console.error(`BOT_LANG_CALLBACK_ERROR: ${(error as Error).message}`);
+          await telegram.answerCallbackQuery(cq.id);
         }
         return new Response('OK', { status: 200 });
       }
