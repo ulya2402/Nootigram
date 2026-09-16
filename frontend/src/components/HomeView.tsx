@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useLayoutEffect } from 'react';
 import { NoteItem, TopicItem } from '../types';
 import { t } from '../services/i18n';
 import { formatRelativeTime } from '../utils/date';
@@ -36,9 +36,35 @@ export const HomeView: React.FC<HomeViewProps> = ({
   const [isSelectMode, setIsSelectMode] = useState<boolean>(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const longPressTimerRef = useRef<number | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const isInitialMount = useRef<boolean>(true);
 
   const triggerHaptic = (style: 'light' | 'medium' | 'heavy' = 'light') => {
     window.Telegram?.WebApp?.HapticFeedback?.impactOccurred(style);
+  };
+
+  useLayoutEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+    listRef.current?.animate(
+      [
+        { opacity: 0.88, transform: 'translate3d(0, 4px, 0) scale(0.995)' },
+        { opacity: 1, transform: 'translate3d(0, -1px, 0) scale(1.001)', offset: 0.65 },
+        { opacity: 1, transform: 'translate3d(0, 0, 0) scale(1)' },
+      ],
+      {
+        duration: 200,
+        easing: 'cubic-bezier(0.25, 1.15, 0.5, 1)',
+      }
+    );
+  }, [selectedFilter]);
+
+  const handleFilterClick = (topicId: string) => {
+    if (selectedFilter === topicId) return;
+    triggerHaptic('light');
+    setSelectedFilter(topicId);
   };
 
   useEffect(() => {
@@ -189,11 +215,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
       <section className="py-2 overflow-x-auto -mx-6 px-6 no-scrollbar">
         <div className="flex items-center gap-5 min-w-max border-b border-cream-divider/50 pb-2">
           <button
-            onClick={() => {
-              triggerHaptic();
-              setSelectedFilter('all');
-            }}
-            className={`text-sm relative transition-colors flex items-center gap-1.5 pb-1 ${
+            onClick={() => handleFilterClick('all')}
+            className={`text-sm relative transition-all duration-150 flex items-center gap-1.5 pb-1 active:scale-95 select-none ${
               selectedFilter === 'all' ? 'font-semibold text-warm-text' : 'font-normal text-warm-muted'
             }`}
           >
@@ -203,18 +226,14 @@ export const HomeView: React.FC<HomeViewProps> = ({
               <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-warm-text rounded-full" />
             )}
           </button>
-
           {topics.map((topic) => {
             const count = notes.filter((n) => n.category === topic.id).length;
             const isActive = selectedFilter === topic.id;
             return (
               <button
                 key={topic.id}
-                onClick={() => {
-                  triggerHaptic();
-                  setSelectedFilter(topic.id);
-                }}
-                className={`text-sm relative transition-colors flex items-center gap-1.5 pb-1 ${
+                onClick={() => handleFilterClick(topic.id)}
+                className={`text-sm relative transition-all duration-150 flex items-center gap-1.5 pb-1 active:scale-95 select-none ${
                   isActive ? 'font-semibold text-warm-text' : 'font-normal text-warm-muted'
                 }`}
               >
@@ -229,8 +248,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
         </div>
       </section>
 
-      <div key={selectedFilter} className="flex flex-col animate-page-fade">
-        {filteredNotes.length === 0 ? (
+        <div ref={listRef} className="flex flex-col will-change-transform">
+          {filteredNotes.length === 0 ? (
           <div className="py-16 text-center text-sm text-warm-muted">
             <span className="material-symbols-outlined text-4xl text-warm-subtle block mb-2">edit_note</span>
             {t('empty_notes')}
