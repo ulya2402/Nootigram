@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { NoteItem, ContentBlock, TaskItem, TableCell, TopicItem } from '../types';
 import { t } from '../services/i18n';
 import { exportNoteToTelegram } from '../services/api';
@@ -10,6 +11,36 @@ interface EditorViewProps {
   onSave: (updated: NoteItem) => void;
   onDelete: (id: string) => void;
 }
+
+const EditableBlock: React.FC<{
+  html: string;
+  placeholder: string;
+  className?: string;
+  onFocus?: () => void;
+  onChange: (newHtml: string) => void;
+}> = ({ html, placeholder, className, onFocus, onChange }) => {
+  const divRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (divRef.current && divRef.current.innerHTML !== html) {
+      divRef.current.innerHTML = html || '';
+    }
+  }, [html]);
+
+  return (
+    <div
+      ref={divRef}
+      contentEditable
+      suppressContentEditableWarning
+      data-placeholder={placeholder}
+      onFocus={onFocus}
+      onInput={(e) => {
+        onChange(e.currentTarget.innerHTML);
+      }}
+      className={className}
+    />
+  );
+};
 
 export const EditorView: React.FC<EditorViewProps> = ({
   note,
@@ -50,17 +81,212 @@ export const EditorView: React.FC<EditorViewProps> = ({
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [exportNotice, setExportNotice] = useState<string | null>(null);
   const [showToc, setShowToc] = useState<boolean>(false);
+  const [keyboardInset, setKeyboardInset] = useState<number>(0);
+  const [isEditorActive, setIsEditorActive] = useState<boolean>(false);
+  const [activeFormats, setActiveFormats] = useState<{
+    bold: boolean;
+    italic: boolean;
+    underline: boolean;
+    strike: boolean;
+    code: boolean;
+    spoiler: boolean;
+  }>({
+    bold: false,
+    italic: false,
+    underline: false,
+    strike: false,
+    code: false,
+    spoiler: false,
+  });
   const [botPromptModal, setBotPromptModal] = useState<{ isOpen: boolean; botUsername: string }>({
     isOpen: false,
     botUsername: '',
   });
-
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const blockElementRefs = useRef<Record<string, HTMLElement | null>>({});
   const historyTimerRef = useRef<number | null>(null);
 
   const triggerHaptic = (style: 'light' | 'medium' = 'light') => {
     window.Telegram?.WebApp?.HapticFeedback?.impactOccurred(style);
+  };
+
+  const updateActiveFormats = useCallback(() => {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) {
+      setActiveFormats({
+        bold: false,
+        italic: false,
+        underline: false,
+        strike: false,
+        code: false,
+        spoiler: false,
+      });
+      return;
+    }
+    let parentNode: Node | null = sel.anchorNode;
+    if (parentNode && parentNode.nodeType === Node.TEXT_NODE) {
+      parentNode = parentNode.parentNode;
+    }
+    const parentEl = parentNode as HTMLElement | null;
+    setActiveFormats({
+      bold: document.queryCommandState('bold'),
+      italic: document.queryCommandState('italic'),
+      underline: document.queryCommandState('underline'),
+      strike: document.queryCommandState('strikeThrough'),
+      code: Boolean(parentEl?.closest('code')),
+      spoiler: Boolean(parentEl?.closest('tg-spoiler')),
+    });
+  }, []);
+
+  useEffect(() => {
+    const handleViewport = () => {
+      if (window.visualViewport) {
+        const offset = Math.max(0, window.innerHeight - window.visualViewport.height);
+        setKeyboardInset(offset);
+      }
+    };
+
+    const handleFocusIn = (e: FocusEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('[contenteditable="true"]') || target?.tagName === 'TEXTAREA' || target?.tagName === 'INPUT') {
+        setIsEditorActive(true);
+      }
+    };
+
+    const handleFocusOut = (e: FocusEvent) => {
+      const related = e.relatedTarget as HTMLElement | null;
+      if (!related?.closest('[data-format-bar="true"]')) {
+        setTimeout(() => {
+          const active = document.activeElement as HTMLElement | null;
+          if (!active?.closest('[contenteditable="true"]') && active?.tagName !== 'TEXTAREA' && active?.tagName !== 'INPUT') {
+            setIsEditorActive(false);
+          }
+        }, 120);
+      }
+    };
+
+    window.visualViewport?.addEventListener('resize', handleViewport);
+    window.visualViewport?.addEventListener('scroll', handleViewport);
+    document.addEventListener('selectionchange', updateActiveFormats);
+    document.addEventListener('focusin', handleFocusIn);
+    document.addEventListener('focusout', handleFocusOut);
+
+    return () => {
+      window.visualViewport?.removeEventListener('resize', handleViewport);
+      window.visualViewport?.removeEventListener('scroll', handleViewport);
+      document.removeEventListener('selectionchange', updateActiveFormats);
+      document.removeEventListener('focusin', handleFocusIn);
+      document.removeEventListener('focusout', handleFocusOut);
+    };
+  }, [updateActiveFormats]);
+
+  const applyFormatCommand = (command: 'bold' | 'italic' | 'underline' | 'strikeThrough') => {
+    triggerHaptic('light');
+    document.execCommand(command, false);
+    if (focusedBlockIndex !== null && currentNote.blocks[focusedBlockIndex]) {
+      const currentEl = blockElementRefs.current[currentNote.blocks[focusedBlockIndex].id];
+      const editableDiv = currentEl?.querySelector('[contenteditable]');
+      if (editableDiv) {
+        updateBlock(
+          focusedBlockIndex,
+          { ...currentNote.blocks[focusedBlockIndex], text: editableDiv.innerHTML } as ContentBlock,
+          true
+        );
+      }
+    }
+    updateActiveFormats();
+  };
+
+  const toggleCustomTag = (tagName: 'tg-spoiler' | 'code') => {
+    triggerHaptic('light');
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+    const range = sel.getRangeAt(0);
+    let parentNode: Node | null = range.commonAncestorContainer;
+    if (parentNode.nodeType === Node.TEXT_NODE) {
+      parentNode = parentNode.parentNode;
+    }
+    const existing = (parentNode as HTMLElement)?.closest(tagName);
+    if (existing) {
+      const parent = existing.parentNode;
+      while (existing.firstChild) {
+        parent?.insertBefore(existing.firstChild, existing);
+      }
+      parent?.removeChild(existing);
+    } else {
+      const el = document.createElement(tagName);
+      try {
+        range.surroundContents(el);
+      } catch (err) {
+        const fragment = range.extractContents();
+        el.appendChild(fragment);
+        range.insertNode(el);
+      }
+      sel.removeAllRanges();
+      const nextRange = document.createRange();
+      nextRange.selectNodeContents(el);
+      sel.addRange(nextRange);
+    }
+    if (focusedBlockIndex !== null && currentNote.blocks[focusedBlockIndex]) {
+      const currentEl = blockElementRefs.current[currentNote.blocks[focusedBlockIndex].id];
+      const editableDiv = currentEl?.querySelector('[contenteditable]');
+      if (editableDiv) {
+        updateBlock(
+          focusedBlockIndex,
+          { ...currentNote.blocks[focusedBlockIndex], text: editableDiv.innerHTML } as ContentBlock,
+          true
+        );
+      }
+    }
+    updateActiveFormats();
+  };
+
+  const handleClearFormatting = () => {
+    triggerHaptic('medium');
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+    document.execCommand('removeFormat', false);
+    const range = sel.getRangeAt(0);
+    let container: Node | null = range.commonAncestorContainer;
+    if (container.nodeType === Node.TEXT_NODE) {
+      container = container.parentNode;
+    }
+    const parentEl = container as HTMLElement | null;
+    const tagsToRemove = ['TG-SPOILER', 'CODE', 'B', 'STRONG', 'I', 'EM', 'U', 'INS', 'S', 'STRIKE', 'DEL'];
+    tagsToRemove.forEach((tag) => {
+      const el = parentEl?.closest(tag);
+      if (el && range.intersectsNode(el)) {
+        const parent = el.parentNode;
+        while (el.firstChild) {
+          parent?.insertBefore(el.firstChild, el);
+        }
+        parent?.removeChild(el);
+      }
+    });
+    if (parentEl) {
+      const descendants = parentEl.querySelectorAll('tg-spoiler, code, b, strong, i, em, u, ins, s, strike, del');
+      descendants.forEach((el) => {
+        if (range.intersectsNode(el)) {
+          const parent = el.parentNode;
+          while (el.firstChild) {
+            parent?.insertBefore(el.firstChild, el);
+          }
+          parent?.removeChild(el);
+        }
+      });
+    }
+    if (focusedBlockIndex !== null && currentNote.blocks[focusedBlockIndex]) {
+      const currentEl = blockElementRefs.current[currentNote.blocks[focusedBlockIndex].id];
+      const editableDiv = currentEl?.querySelector('[contenteditable]');
+      if (editableDiv) {
+        updateBlock(
+          focusedBlockIndex,
+          { ...currentNote.blocks[focusedBlockIndex], text: editableDiv.innerHTML } as ContentBlock,
+          true
+        );
+      }
+    }
+    updateActiveFormats();
   };
 
   useEffect(() => {
@@ -401,7 +627,9 @@ export const EditorView: React.FC<EditorViewProps> = ({
       if (b.type === 'heading') {
         richBlocks.push({ type: 'heading', size: b.size, text: b.text });
       } else if (b.type === 'paragraph') {
-        if (b.text.trim()) richBlocks.push({ type: 'paragraph', text: b.text });
+        if (b.text && b.text.trim()) {
+          richBlocks.push({ type: 'paragraph', text: b.text });
+        }
       } else if (b.type === 'quote') {
         richBlocks.push({
           type: 'blockquote',
@@ -585,7 +813,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
               >
                 <span>{t('tool_paragraph')}</span>
               </button>
-              {([2, 3, 4, 5, 6] as const).map((lvl) => (
+              {([1, 2, 3, 4, 5, 6] as const).map((lvl) => (
                 <button
                   key={lvl}
                   onClick={() => appendBlockWithParagraph('heading', { size: lvl })}
@@ -700,26 +928,31 @@ export const EditorView: React.FC<EditorViewProps> = ({
             </button>
           </div>
           <div className="flex flex-col gap-1.5 pt-2 max-h-48 overflow-y-auto">
-            {headingsList.length === 0 ? (
-              <span className="text-xs text-warm-subtle italic">{t('toc_empty')}</span>
-            ) : (
-              headingsList.map((hBlock) => (
-                <button
-                  key={hBlock.id}
-                  onClick={() => scrollToHeading(hBlock.id)}
-                  className={`text-left text-xs text-warm-text hover:text-warm-accent transition-colors truncate ${
-                    hBlock.size === 2
-                      ? 'pl-2 font-semibold'
-                      : hBlock.size === 3
-                      ? 'pl-4 font-medium'
-                      : 'pl-6 text-warm-muted'
-                  }`}
-                >
-                  {hBlock.text}
-                </button>
-              ))
-            )}
-          </div>
+                {headingsList.length === 0 ? (
+                  <span className="text-xs text-warm-subtle italic">{t('toc_empty')}</span>
+                ) : (
+                  headingsList.map((hBlock) => {
+                    const indentStyles: Record<number, string> = {
+                      1: 'pl-1 text-[13px] font-bold text-warm-text',
+                      2: 'pl-3 text-xs font-semibold text-warm-text',
+                      3: 'pl-5 text-xs font-medium text-warm-text',
+                      4: 'pl-7 text-xs font-normal text-warm-muted',
+                      5: 'pl-9 text-[11px] font-normal text-warm-muted',
+                      6: 'pl-11 text-[11px] font-normal text-warm-subtle',
+                    };
+                    const styleClass = indentStyles[hBlock.size] || indentStyles[2];
+                    return (
+                      <button
+                        key={hBlock.id}
+                        onClick={() => scrollToHeading(hBlock.id)}
+                        className={`text-left transition-colors truncate hover:text-warm-accent ${styleClass}`}
+                      >
+                        {hBlock.text}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
         </div>
       )}
 
@@ -745,17 +978,12 @@ export const EditorView: React.FC<EditorViewProps> = ({
             >
               <div className="flex-1">
                 {block.type === 'paragraph' && (
-                  <textarea
-                    rows={1}
-                    value={block.text}
+                  <EditableBlock
+                    html={block.text}
                     placeholder={t('paragraph_placeholder')}
-                    ref={(el) => {
-                      if (el) autoResize(el);
-                    }}
                     onFocus={() => setFocusedBlockIndex(index)}
-                    onInput={(e) => autoResize(e.currentTarget)}
-                    onChange={(e) => updateBlock(index, { ...block, text: e.target.value })}
-                    className="w-full text-[15px] leading-relaxed text-warm-text bg-transparent border-none focus:outline-none placeholder:text-warm-subtle resize-none overflow-hidden"
+                    onChange={(newHtml) => updateBlock(index, { ...block, text: newHtml })}
+                    className="w-full text-[15px] leading-relaxed text-warm-text bg-transparent border-none focus:outline-none min-h-[24px]"
                   />
                 )}
 
@@ -1177,6 +1405,101 @@ export const EditorView: React.FC<EditorViewProps> = ({
         </div>
       </div>
 
+      {isEditorActive &&
+        createPortal(
+          <div
+            data-format-bar="true"
+            className="fixed inset-x-0 z-50 flex justify-center px-4 pointer-events-none max-w-[420px] mx-auto select-none"
+            style={{
+              bottom: keyboardInset > 0
+                ? `${keyboardInset + 10}px`
+                : 'calc(max(var(--tg-content-bottom, 0px), var(--tg-safe-bottom, 0px), env(safe-area-inset-bottom, 0px)) + 12px)',
+            }}
+          >
+            <div className="pointer-events-auto flex items-center p-1 rounded-full bg-cream-surface border border-cream-divider shadow-xl backdrop-blur-md">
+              <button
+                onPointerDown={(e) => e.preventDefault()}
+                onClick={() => applyFormatCommand('bold')}
+                className={`flex items-center justify-center w-8 h-8 rounded-full transition-colors text-xs font-bold ${
+                  activeFormats.bold
+                    ? 'bg-warm-accent text-[#FAF8F5]'
+                    : 'text-warm-muted hover:text-warm-text active:bg-cream-divider'
+                }`}
+              >
+                B
+              </button>
+              <button
+                onPointerDown={(e) => e.preventDefault()}
+                onClick={() => applyFormatCommand('italic')}
+                className={`flex items-center justify-center w-8 h-8 rounded-full transition-colors text-xs italic font-serif ${
+                  activeFormats.italic
+                    ? 'bg-warm-accent text-[#FAF8F5]'
+                    : 'text-warm-muted hover:text-warm-text active:bg-cream-divider'
+                }`}
+              >
+                I
+              </button>
+              <button
+                onPointerDown={(e) => e.preventDefault()}
+                onClick={() => applyFormatCommand('underline')}
+                className={`flex items-center justify-center w-8 h-8 rounded-full transition-colors text-xs underline ${
+                  activeFormats.underline
+                    ? 'bg-warm-accent text-[#FAF8F5]'
+                    : 'text-warm-muted hover:text-warm-text active:bg-cream-divider'
+                }`}
+              >
+                U
+              </button>
+              <button
+                onPointerDown={(e) => e.preventDefault()}
+                onClick={() => applyFormatCommand('strikeThrough')}
+                className={`flex items-center justify-center w-8 h-8 rounded-full transition-colors text-xs line-through ${
+                  activeFormats.strike
+                    ? 'bg-warm-accent text-[#FAF8F5]'
+                    : 'text-warm-muted hover:text-warm-text active:bg-cream-divider'
+                }`}
+              >
+                S
+              </button>
+              <div className="w-[1px] h-4 bg-cream-divider mx-1" />
+              <button
+                onPointerDown={(e) => e.preventDefault()}
+                onClick={() => toggleCustomTag('code')}
+                className={`flex items-center justify-center w-8 h-8 rounded-full transition-colors text-[11px] font-mono ${
+                  activeFormats.code
+                    ? 'bg-warm-accent text-[#FAF8F5]'
+                    : 'text-warm-muted hover:text-warm-text active:bg-cream-divider'
+                }`}
+              >
+                &lt;/&gt;
+              </button>
+              <button
+                onPointerDown={(e) => e.preventDefault()}
+                onClick={() => toggleCustomTag('tg-spoiler')}
+                className={`flex items-center justify-center w-8 h-8 rounded-full transition-colors ${
+                  activeFormats.spoiler
+                    ? 'bg-warm-accent text-[#FAF8F5]'
+                    : 'text-warm-muted hover:text-warm-text active:bg-cream-divider'
+                }`}
+              >
+                <span className="material-symbols-outlined text-[17px] leading-none">
+                  visibility_off
+                </span>
+              </button>
+              <div className="w-[1px] h-4 bg-cream-divider mx-1" />
+              <button
+                onPointerDown={(e) => e.preventDefault()}
+                onClick={handleClearFormatting}
+                className="flex items-center justify-center w-8 h-8 rounded-full transition-colors text-warm-muted hover:text-warm-text active:bg-cream-divider"
+              >
+                <span className="material-symbols-outlined text-[16px] leading-none">
+                  format_clear
+                </span>
+              </button>
+            </div>
+          </div>,
+          document.body
+        )}
       {botPromptModal.isOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-[#24201D]/40 animate-page-fade">
           <div className="w-full max-w-sm p-5 rounded-2xl bg-[#FAF8F5] border border-cream-divider shadow-sm flex flex-col gap-3.5">

@@ -58,14 +58,127 @@ export class TelegramService {
     }
   }
 
+  private formatInlineHtml(raw: string): string {
+    if (!raw) return '';
+    return raw
+      .replace(/<div><br\s*[\/]?>\s*<\/div>/gi, '<br>')
+      .replace(/<div>/gi, '<br>')
+      .replace(/<\/div>/gi, '')
+      .replace(/<p>/gi, '')
+      .replace(/<\/p>/gi, '<br>')
+      .replace(/\r\n|\r|\n/g, '<br>')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/<strong>/gi, '<b>')
+      .replace(/<\/strong>/gi, '</b>')
+      .replace(/<em>/gi, '<i>')
+      .replace(/<\/em>/gi, '</i>')
+      .replace(/<ins>/gi, '<u>')
+      .replace(/<\/ins>/gi, '</u>')
+      .replace(/<del>/gi, '<s>')
+      .replace(/<\/del>/gi, '</s>')
+      .replace(/<strike>/gi, '<s>')
+      .replace(/<\/strike>/gi, '</s>')
+      .replace(/<span[^>]*>/gi, '')
+      .replace(/<\/span>/gi, '')
+      .replace(/(<br>\s*)+$/gi, '')
+      .trim();
+  }
+
+  private buildRichHtml(richMessage: InputRichMessage): string {
+    if (richMessage.html) return this.formatInlineHtml(richMessage.html);
+    if (!richMessage.blocks) return '';
+    let html = '';
+    for (const b of richMessage.blocks) {
+      if (b.type === 'heading') {
+        const size = b.size || 2;
+        const text = this.formatInlineHtml(b.text);
+        if (text) html += `<h${size}>${text}</h${size}>\n\n`;
+      } else if (b.type === 'paragraph') {
+        const text = this.formatInlineHtml(b.text);
+        if (text) html += `<p>${text}</p>\n\n`;
+      } else if (b.type === 'blockquote') {
+        const quoteText = b.blocks && b.blocks[0] && 'text' in b.blocks[0] ? (b.blocks[0] as any).text : '';
+        const text = this.formatInlineHtml(quoteText);
+        const cite = b.credit ? `<cite>${this.formatInlineHtml(b.credit)}</cite>` : '';
+        if (text) html += `<blockquote>${text}${cite}</blockquote>\n\n`;
+      } else if (b.type === 'expandable_blockquote') {
+        const text = this.formatInlineHtml(b.text);
+        const cite = b.credit ? `<cite>${this.formatInlineHtml(b.credit)}</cite>` : '';
+        if (text) html += `<blockquote expandable>${text}${cite}</blockquote>\n\n`;
+      } else if (b.type === 'pullquote') {
+        const text = this.formatInlineHtml(b.text);
+        const cite = b.credit ? `<cite>${this.formatInlineHtml(b.credit)}</cite>` : '';
+        if (text) html += `<aside>${text}${cite}</aside>\n\n`;
+      } else if (b.type === 'pre') {
+        const langAttr = b.language ? ` class="language-${b.language}"` : '';
+        html += `<pre><code${langAttr}>${b.text}</code></pre>\n\n`;
+      } else if (b.type === 'mathematical_expression') {
+        html += `<tg-math-block>${b.expression}</tg-math-block>\n\n`;
+      } else if (b.type === 'divider') {
+        html += `<hr/>\n\n`;
+      } else if (b.type === 'table') {
+        let attrs = '';
+        if (b.is_bordered) attrs += ' bordered';
+        if (b.is_striped) attrs += ' striped';
+        if (b.is_compact) attrs += ' compact';
+        let tbl = `<table${attrs}>`;
+        if (b.caption) tbl += `<caption>${this.formatInlineHtml(b.caption)}</caption>`;
+        for (let rIdx = 0; rIdx < b.cells.length; rIdx++) {
+          tbl += '<tr>';
+          for (const cell of b.cells[rIdx]) {
+            const tag = cell.is_header || rIdx === 0 ? 'th' : 'td';
+            const align = cell.align ? ` align="${cell.align}"` : '';
+            tbl += `<${tag}${align}>${this.formatInlineHtml(cell.text)}</${tag}>`;
+          }
+          tbl += '</tr>';
+        }
+        tbl += '</table>\n\n';
+        html += tbl;
+      } else if (b.type === 'list') {
+        const isTask = b.items.some((i) => i.has_checkbox);
+        const isOrdered = b.items.some((i) => Boolean(i.label));
+        if (isTask) {
+          html += '<ul>';
+          for (const it of b.items) {
+            const itText = it.blocks && it.blocks[0] && 'text' in it.blocks[0] ? (it.blocks[0] as any).text : '';
+            const chk = it.is_checked ? ' checked' : '';
+            html += `<li><input type="checkbox"${chk}>${this.formatInlineHtml(itText)}</li>`;
+          }
+          html += '</ul>\n\n';
+        } else if (isOrdered) {
+          html += '<ol>';
+          for (const it of b.items) {
+            const itText = it.blocks && it.blocks[0] && 'text' in it.blocks[0] ? (it.blocks[0] as any).text : '';
+            html += `<li>${this.formatInlineHtml(itText)}</li>`;
+          }
+          html += '</ol>\n\n';
+        } else {
+          html += '<ul>';
+          for (const it of b.items) {
+            const itText = it.blocks && it.blocks[0] && 'text' in it.blocks[0] ? (it.blocks[0] as any).text : '';
+            html += `<li>${this.formatInlineHtml(itText)}</li>`;
+          }
+          html += '</ul>\n\n';
+        }
+      } else if (b.type === 'details') {
+        const detText = b.blocks && b.blocks[0] && 'text' in b.blocks[0] ? (b.blocks[0] as any).text : '';
+        html += `<details><summary>${this.formatInlineHtml(b.summary)}</summary>${this.formatInlineHtml(detText)}</details>\n\n`;
+      }
+    }
+    return html.trim();
+  }
+
   async sendRichMessage(chatId: number | string, richMessage: InputRichMessage): Promise<TelegramSendResult> {
+    const richHtml = this.buildRichHtml(richMessage);
     try {
       const response = await fetch(`${this.baseUrl}/sendRichMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           chat_id: chatId,
-          rich_message: richMessage,
+          rich_message: {
+            html: richHtml,
+          },
         }),
       });
       const data = (await response.json()) as { ok: boolean; error_code?: number; description?: string };
@@ -76,58 +189,43 @@ export class TelegramService {
         console.error(`TELEGRAM_PERMISSION_DENIED: User ${chatId} has not initiated conversation with bot`);
         return { ok: false, errorCode: 403, description: data.description };
       }
-      console.error(`TELEGRAM_RICH_MESSAGE_FAILED: ${data.description}, falling back to markdown`);
-      return this.sendFallbackMarkdown(chatId, richMessage);
+      console.error(`TELEGRAM_RICH_MESSAGE_FAILED: ${data.description}, falling back to html sendMessage`);
+      return this.sendFallbackHtml(chatId, richHtml);
     } catch (error) {
       console.error(`TELEGRAM_RICH_MESSAGE_EXCEPTION: ${(error as Error).message}`);
-      return this.sendFallbackMarkdown(chatId, richMessage);
+      return this.sendFallbackHtml(chatId, richHtml);
     }
   }
 
-  private async sendFallbackMarkdown(chatId: number | string, richMessage: InputRichMessage): Promise<TelegramSendResult> {
-    let md = '';
-    if (richMessage.markdown) {
-      md = richMessage.markdown;
-    } else if (richMessage.blocks) {
-      for (const b of richMessage.blocks) {
-        if (b.type === 'heading') {
-          md += `*${b.text}*\n\n`;
-        } else if (b.type === 'paragraph') {
-          md += `${b.text}\n\n`;
-        } else if (b.type === 'blockquote') {
-          const quoteText = b.blocks && b.blocks[0] && 'text' in b.blocks[0] ? (b.blocks[0] as any).text : '';
-          md += `>${quoteText}\n\n`;
-        } else if (b.type === 'expandable_blockquote') {
-          md += `**>${b.text}**\n\n`;
-        } else if (b.type === 'pullquote') {
-          md += `_${b.text}_\n\n`;
-        } else if (b.type === 'pre') {
-          md += `\`\`\`${b.language || ''}\n${b.text}\n\`\`\`\n\n`;
-        } else if (b.type === 'mathematical_expression') {
-          md += `$$${b.expression}$$\n\n`;
-        } else if (b.type === 'divider') {
-          md += `---\n\n`;
-        } else if (b.type === 'table') {
-          for (const row of b.cells) {
-            md += `| ${row.map((c) => c.text).join(' | ')} |\n`;
-          }
-          md += '\n';
-        } else if (b.type === 'list') {
-          for (const item of b.items) {
-            const itemText = item.blocks && item.blocks[0] && 'text' in item.blocks[0] ? (item.blocks[0] as any).text : '';
-            md += `${item.has_checkbox ? (item.is_checked ? '✅ ' : '⬜ ') : '• '}${itemText}\n`;
-          }
-          md += '\n';
-        } else if (b.type === 'details') {
-          const detText = b.blocks && b.blocks[0] && 'text' in b.blocks[0] ? (b.blocks[0] as any).text : '';
-          md += `*${b.summary}*\n${detText}\n\n`;
-        }
-      }
+  private async sendFallbackHtml(chatId: number | string, html: string): Promise<TelegramSendResult> {
+    const adaptedHtml = html
+      .replace(/<table[^>]*>([\s\S]*?)<\/table>/gi, (_, content) => {
+        const rows = content.match(/<tr[^>]*>([\s\S]*?)<\/tr>/gi) || [];
+        const lines = rows.map((r: string) => {
+          const cells = r.match(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi) || [];
+          return cells.map((c: string) => c.replace(/<[^>]*>/g, '').trim()).join(' | ');
+        });
+        return `<pre>${lines.join('\n')}</pre>\n\n`;
+      })
+      .replace(/<details><summary>(.*?)<\/summary>([\s\S]*?)<\/details>/gi, '<b>$1</b>\n<blockquote>$2</blockquote>\n\n')
+      .replace(/<aside>(.*?)<\/aside>/gi, '<blockquote>$1</blockquote>\n\n')
+      .replace(/<tg-math-block>(.*?)<\/tg-math-block>/gi, '<pre><code>$1</code></pre>\n\n')
+      .replace(/<hr\s*[\/]?>/gi, '— — —\n\n')
+      .replace(/<li><input type="checkbox" checked>(.*?)<\/li>/gi, '☑ $1\n')
+      .replace(/<li><input type="checkbox">(.*?)<\/li>/gi, '☐ $1\n')
+      .replace(/<li>(.*?)<\/li>/gi, '• $1\n')
+      .replace(/<ul[^>]*>|<\/ul>|<ol[^>]*>|<\/ol>/gi, '')
+      .replace(/<h[1-6]>(.*?)<\/h[1-6]>/gi, '<b>$1</b>\n\n')
+      .replace(/<p>(.*?)<\/p>/gi, '$1\n\n')
+      .trim();
+    const finalHtml = adaptedHtml || 'Empty note';
+    const res = await this.sendMessage(chatId, finalHtml, undefined, 'HTML');
+    if (!res.ok && res.errorCode === 400) {
+      console.error(`TELEGRAM_HTML_REJECTED: ${res.description}, falling back to plain text`);
+      const plainText = finalHtml.replace(/<[^>]*>/g, '');
+      return this.sendMessage(chatId, plainText);
     }
-    if (!md.trim()) {
-      md = 'Empty note';
-    }
-    return this.sendMessage(chatId, md, undefined, 'Markdown');
+    return res;
   }
 
   async answerCallbackQuery(callbackQueryId: string, text?: string): Promise<boolean> {

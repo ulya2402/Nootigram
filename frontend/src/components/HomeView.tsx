@@ -16,10 +16,10 @@ interface HomeViewProps {
 function extractSnippet(note: NoteItem): string {
   for (const block of note.blocks) {
     if (block.type === 'paragraph' && block.text.trim()) {
-      return block.text;
+      return block.text.replace(/<[^>]*>/g, '').trim();
     }
   }
-  return note.content_raw || '';
+  return (note.content_raw || '').replace(/<[^>]*>/g, '').trim();
 }
 
 export const HomeView: React.FC<HomeViewProps> = ({
