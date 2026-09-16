@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { NoteItem, ContentBlock, TaskItem, TableCell, TopicItem } from '../types';
 import { t } from '../services/i18n';
@@ -53,12 +53,14 @@ export const EditorView: React.FC<EditorViewProps> = ({
     if (!rawBlocks || rawBlocks.length === 0) {
       return [{ id: `p-${Date.now()}`, type: 'paragraph', text: '' }];
     }
-    return rawBlocks.map((b) => {
+    return rawBlocks.map((b, idx) => {
+      const id = b.id || `block-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 7)}`;
       if (b.type === 'list') {
         const hasTaskStyle = b.style === 'task' || (!b.style && b.items?.some((i: any) => i.has_checkbox || i.is_checked !== undefined));
         const resolvedStyle = hasTaskStyle ? 'task' : (b.style || 'bullet');
         return {
           ...b,
+          id,
           style: resolvedStyle,
           items: (b.items || []).map((it) => ({
             id: it.id || `task-${Date.now()}-${Math.random()}`,
@@ -67,7 +69,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
           })),
         };
       }
-      return b;
+      return { ...b, id };
     });
   };
 
@@ -105,10 +107,73 @@ export const EditorView: React.FC<EditorViewProps> = ({
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const blockElementRefs = useRef<Record<string, HTMLElement | null>>({});
   const historyTimerRef = useRef<number | null>(null);
+  const flipPositionsRef = useRef<Map<string, number>>(new Map());
+
+  useLayoutEffect(() => {
+    if (flipPositionsRef.current.size === 0) return;
+    const prevPositions = flipPositionsRef.current;
+    flipPositionsRef.current = new Map();
+
+    const container = scrollContainerRef.current;
+    const scrollOffset = container ? container.scrollTop : 0;
+
+    currentNote.blocks.forEach((b) => {
+      const oldTop = prevPositions.get(b.id);
+      const el = blockElementRefs.current[b.id];
+      if (oldTop !== undefined && el) {
+        const newTop = el.getBoundingClientRect().top + scrollOffset;
+        const delta = oldTop - newTop;
+        if (Math.abs(delta) > 0.5) {
+          el.animate(
+            [
+              { transform: `translate3d(0, ${delta}px, 0)` },
+              { transform: 'translate3d(0, 0, 0)' },
+            ],
+            {
+              duration: 260,
+              easing: 'cubic-bezier(0.34, 1.35, 0.64, 1)',
+            }
+          );
+        }
+      }
+    });
+  }, [currentNote.blocks]);
 
   const triggerHaptic = (style: 'light' | 'medium' = 'light') => {
     window.Telegram?.WebApp?.HapticFeedback?.impactOccurred(style);
   };
+
+  useLayoutEffect(() => {
+    if (flipPositionsRef.current.size === 0) return;
+    const prevPositions = flipPositionsRef.current;
+    flipPositionsRef.current = new Map();
+
+    currentNote.blocks.forEach((b) => {
+      const oldTop = prevPositions.get(b.id);
+      const el = blockElementRefs.current[b.id];
+      if (oldTop !== undefined && el) {
+        const newTop = el.getBoundingClientRect().top;
+        const delta = oldTop - newTop;
+        if (Math.abs(delta) > 0.5) {
+          el.animate(
+            [
+              { transform: `translate3d(0, ${delta}px, 0)` },
+              { transform: 'translate3d(0, 0, 0)' },
+            ],
+            {
+              duration: 260,
+              easing: 'cubic-bezier(0.34, 1.35, 0.64, 1)',
+            }
+          );
+        }
+      }
+    });
+  }, [currentNote.blocks]);
+
+
+  const isMovingRef = useRef<boolean>(false);
+
+  
 
   const updateActiveFormats = useCallback(() => {
     const sel = window.getSelection();
@@ -384,10 +449,31 @@ export const EditorView: React.FC<EditorViewProps> = ({
     const targetIndex = direction === 'up' ? index - 1 : index + 1;
     if (targetIndex < 0 || targetIndex >= currentNote.blocks.length) return;
     triggerHaptic('light');
+
+    const container = scrollContainerRef.current;
+    const scrollOffset = container ? container.scrollTop : 0;
+    const positions = new Map<string, number>();
+
+    currentNote.blocks.forEach((b) => {
+      const el = blockElementRefs.current[b.id];
+      if (el) {
+        positions.set(b.id, el.getBoundingClientRect().top + scrollOffset);
+      }
+    });
+    flipPositionsRef.current = positions;
+
     const nextBlocks = [...currentNote.blocks];
     const temp = nextBlocks[index];
     nextBlocks[index] = nextBlocks[targetIndex];
     nextBlocks[targetIndex] = temp;
+
+    if (activeTableCell && activeTableCell.blockIndex === index) {
+      setActiveTableCell({
+        ...activeTableCell,
+        blockIndex: targetIndex,
+      });
+    }
+
     persistChange({ ...currentNote, blocks: nextBlocks }, true);
     setFocusedBlockIndex(targetIndex);
   };
@@ -497,12 +583,24 @@ export const EditorView: React.FC<EditorViewProps> = ({
     updateBlock(tableIndex, { ...tableBlock, cells: [...tableBlock.cells, newRow] }, true);
   };
 
-  const removeTableRow = (tableIndex: number) => {
+  const removeTableRow = (tableIndex: number, targetRowIndex?: number) => {
     triggerHaptic('light');
     const tableBlock = currentNote.blocks[tableIndex];
     if (tableBlock.type !== 'table' || tableBlock.cells.length <= 1) return;
-    const updatedCells = tableBlock.cells.slice(0, -1);
+    const removeIdx = targetRowIndex !== undefined && targetRowIndex >= 0 && targetRowIndex < tableBlock.cells.length
+      ? targetRowIndex
+      : tableBlock.cells.length - 1;
+    const updatedCells = tableBlock.cells.filter((_, idx) => idx !== removeIdx);
+    if (removeIdx === 0 && updatedCells.length > 0) {
+      updatedCells[0] = updatedCells[0].map((cell) => ({ ...cell, is_header: true }));
+    }
     updateBlock(tableIndex, { ...tableBlock, cells: updatedCells }, true);
+    if (activeTableCell && activeTableCell.blockIndex === tableIndex) {
+      setActiveTableCell({
+        ...activeTableCell,
+        rowIndex: Math.min(activeTableCell.rowIndex, updatedCells.length - 1),
+      });
+    }
   };
 
   const addTableColumn = (tableIndex: number) => {
@@ -516,12 +614,21 @@ export const EditorView: React.FC<EditorViewProps> = ({
     updateBlock(tableIndex, { ...tableBlock, cells: updatedCells }, true);
   };
 
-  const removeTableColumn = (tableIndex: number) => {
+  const removeTableColumn = (tableIndex: number, targetColIndex?: number) => {
     triggerHaptic('light');
     const tableBlock = currentNote.blocks[tableIndex];
     if (tableBlock.type !== 'table' || (tableBlock.cells[0]?.length || 0) <= 1) return;
-    const updatedCells = tableBlock.cells.map((row) => row.slice(0, -1));
+    const removeIdx = targetColIndex !== undefined && targetColIndex >= 0 && targetColIndex < (tableBlock.cells[0]?.length || 0)
+      ? targetColIndex
+      : (tableBlock.cells[0]?.length || 0) - 1;
+    const updatedCells = tableBlock.cells.map((row) => row.filter((_, idx) => idx !== removeIdx));
     updateBlock(tableIndex, { ...tableBlock, cells: updatedCells }, true);
+    if (activeTableCell && activeTableCell.blockIndex === tableIndex) {
+      setActiveTableCell({
+        ...activeTableCell,
+        colIndex: Math.min(activeTableCell.colIndex, (updatedCells[0]?.length || 1) - 1),
+      });
+    }
   };
 
   const toggleTableBorder = (tableIndex: number) => {
@@ -691,7 +798,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
   return (
     <div
       ref={scrollContainerRef}
-      className="flex flex-col w-full h-full overflow-y-auto px-6 animate-page-fade relative"
+      className="flex flex-col w-full h-full overflow-y-auto overflow-x-hidden px-6 animate-page-fade relative"
       style={{ paddingBottom: 'calc(var(--keyboard-inset, 0px) + 5rem)' }}
     >
       <div className="sticky top-0 z-30 bg-[#FAF8F5]/95 safe-header-box pb-2 border-b border-cream-divider flex flex-col gap-2">
@@ -967,16 +1074,16 @@ export const EditorView: React.FC<EditorViewProps> = ({
           className="text-2xl font-bold tracking-tight text-warm-text bg-transparent border-none focus:outline-none placeholder:text-warm-subtle w-full mb-3 resize-none overflow-hidden"
         />
 
-        <div className="flex flex-col gap-2.5 min-h-[300px]">
+        <div className="flex flex-col gap-2.5 min-h-[300px] w-full min-w-0">
           {currentNote.blocks.map((block, index) => (
             <div
               key={block.id}
               ref={(el) => {
                 blockElementRefs.current[block.id] = el;
               }}
-              className="relative group flex items-start gap-1 animate-block-enter"
+              className="relative group flex items-start gap-1 w-full min-w-0"
             >
-              <div className="flex-1">
+              <div className="flex-1 min-w-0 w-full">
                 {block.type === 'paragraph' && (
                   <EditableBlock
                     html={block.text}
@@ -1176,41 +1283,130 @@ export const EditorView: React.FC<EditorViewProps> = ({
                 )}
 
                 {block.type === 'table' && (
-                  <div className="flex flex-col gap-2 my-3">
-                    <div className="overflow-x-auto py-0.5">
-                      <table
-                        className={`w-full text-xs border-collapse rounded-lg overflow-hidden transition-all ${
-                          block.is_bordered ? 'border border-cream-divider' : ''
+                  <div className="flex flex-col gap-1.5 my-3 w-full min-w-0 max-w-full">
+                    <div
+                      className={`relative w-full min-w-0 max-w-full rounded-xl overflow-hidden bg-[#FAF8F5] transition-all duration-150 ${
+                        block.is_bordered ? 'border border-cream-divider' : 'border border-transparent'
+                      }`}
+                    >
+                      <div
+                        className={`flex items-center justify-between px-2.5 bg-cream-surface transition-all duration-150 ease-out overflow-x-auto no-scrollbar gap-2 ${
+                          block.is_bordered ? 'border-b border-cream-divider' : ''
+                        } ${
+                          focusedBlockIndex === index
+                            ? 'max-h-12 py-1.5 opacity-100'
+                            : 'max-h-0 py-0 opacity-0 pointer-events-none'
                         }`}
                       >
-                        <tbody>
-                          {block.cells.map((row, rIdx) => (
-                            <tr
-                              key={rIdx}
-                              className={`${
-                                rIdx === 0
-                                  ? 'bg-cream-surface/90 font-semibold text-warm-text border-b border-cream-divider'
-                                  : block.is_striped && rIdx % 2 === 1
-                                  ? 'bg-cream-surface/40'
-                                  : 'bg-transparent'
+                        <div className="flex items-center gap-1">
+                          {activeTableCell && activeTableCell.blockIndex === index && (
+                            <div className="flex items-center bg-[#FAF8F5] border border-cream-divider rounded-lg p-0.5">
+                              <button
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => setCellAlignment(index, activeTableCell.rowIndex, activeTableCell.colIndex, 'left')}
+                                className="w-6 h-6 flex items-center justify-center rounded text-warm-muted hover:text-warm-text active:scale-90 transition-transform"
+                              >
+                                <span className="material-symbols-outlined text-[14px]">format_align_left</span>
+                              </button>
+                              <button
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => setCellAlignment(index, activeTableCell.rowIndex, activeTableCell.colIndex, 'center')}
+                                className="w-6 h-6 flex items-center justify-center rounded text-warm-muted hover:text-warm-text active:scale-90 transition-transform"
+                              >
+                                <span className="material-symbols-outlined text-[14px]">format_align_center</span>
+                              </button>
+                              <button
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => setCellAlignment(index, activeTableCell.rowIndex, activeTableCell.colIndex, 'right')}
+                                className="w-6 h-6 flex items-center justify-center rounded text-warm-muted hover:text-warm-text active:scale-90 transition-transform"
+                              >
+                                <span className="material-symbols-outlined text-[14px]">format_align_right</span>
+                              </button>
+                            </div>
+                          )}
+
+                          <div className="flex items-center gap-0.5">
+                            <button
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => toggleTableBorder(index)}
+                              className={`p-1 rounded-lg transition-colors active:scale-90 ${
+                                block.is_bordered ? 'text-warm-accent bg-warm-accent-light' : 'text-warm-muted hover:text-warm-text'
                               }`}
                             >
-                              {row.map((col, cIdx) => {
-                                const isCurrentActiveCell =
-                                  activeTableCell?.blockIndex === index &&
-                                  activeTableCell?.rowIndex === rIdx &&
-                                  activeTableCell?.colIndex === cIdx;
-                                return (
+                              <span className="material-symbols-outlined text-[15px]">border_all</span>
+                            </button>
+                            <button
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => toggleTableStriped(index)}
+                              className={`p-1 rounded-lg transition-colors active:scale-90 ${
+                                block.is_striped ? 'text-warm-accent bg-warm-accent-light' : 'text-warm-muted hover:text-warm-text'
+                              }`}
+                            >
+                              <span className="material-symbols-outlined text-[15px]">table_rows</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1">
+                          <button
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => removeTableRow(index, activeTableCell?.rowIndex)}
+                            disabled={block.cells.length <= 1}
+                            className="px-2 py-1 rounded-md text-[11px] font-medium text-warm-muted hover:text-red-600 disabled:opacity-30 flex items-center gap-0.5 active:scale-90 transition-transform"
+                          >
+                            <span className="material-symbols-outlined text-[13px]">delete</span>
+                            <span>{t('del_row').replace(/^[+\-–]\s*/, '')}</span>
+                          </button>
+                          <span className="h-3 w-[1px] bg-cream-divider mx-0.5" />
+                          <button
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => removeTableColumn(index, activeTableCell?.colIndex)}
+                            disabled={(block.cells[0]?.length || 0) <= 1}
+                            className="px-2 py-1 rounded-md text-[11px] font-medium text-warm-muted hover:text-red-600 disabled:opacity-30 flex items-center gap-0.5 active:scale-90 transition-transform"
+                          >
+                            <span className="material-symbols-outlined text-[13px]">delete</span>
+                            <span>{t('del_col').replace(/^[+\-–]\s*/, '')}</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="w-full max-w-full overflow-x-auto no-scrollbar scroll-smooth overscroll-x-contain">
+                        <table
+                          className={`text-xs border-collapse ${
+                            (block.cells[0]?.length || 0) <= 2 ? 'w-full table-fixed' : 'w-max min-w-full'
+                          }`}
+                        >
+                          <tbody>
+                            {block.cells.map((row, rIdx) => (
+                              <tr
+                                key={rIdx}
+                                className={`${
+                                  rIdx === 0
+                                    ? `bg-cream-surface/80 font-semibold text-warm-text ${
+                                        block.is_bordered ? 'border-b border-cream-divider' : ''
+                                      }`
+                                    : block.is_striped && rIdx % 2 === 1
+                                    ? 'bg-cream-surface/35'
+                                    : 'bg-transparent'
+                                }`}
+                              >
+                                {row.map((col, cIdx) => (
                                   <td
                                     key={cIdx}
-                                    className={`p-0 relative border-b border-cream-divider/50 ${
-                                      block.is_bordered ? 'border-r border-cream-divider/50 last:border-r-0' : ''
+                                    className={`p-0 relative min-w-0 ${
+                                      (block.cells[0]?.length || 0) > 2 ? 'min-w-[100px]' : ''
+                                    } ${
+                                      block.is_bordered
+                                        ? `border-cream-divider ${rIdx < block.cells.length - 1 ? 'border-b' : ''} ${
+                                            cIdx < row.length - 1 ? 'border-r' : ''
+                                          }`
+                                        : 'border-none'
                                     }`}
                                   >
                                     <input
                                       type="text"
                                       value={col.text}
-                                      placeholder={`[${rIdx + 1},${cIdx + 1}]`}
+                                      placeholder={rIdx === 0 ? `${t('table_col')} ${cIdx + 1}` : `${t('table_cell')} ${rIdx + 1}`}
                                       onFocus={() => {
                                         setFocusedBlockIndex(index);
                                         setActiveTableCell({ blockIndex: index, rowIndex: rIdx, colIndex: cIdx });
@@ -1221,98 +1417,60 @@ export const EditorView: React.FC<EditorViewProps> = ({
                                         );
                                         updateBlock(index, { ...block, cells: nextCells }, false);
                                       }}
-                                      className={`w-full bg-transparent border-none focus:outline-none text-warm-text px-2.5 py-1.5 font-medium transition-colors ${
-                                        isCurrentActiveCell ? 'bg-warm-accent/5' : ''
-                                      } ${
+                                      className={`w-full min-w-0 bg-transparent border-none focus:outline-none text-warm-text px-2.5 py-1.5 font-medium ${
                                         col.align === 'center' ? 'text-center' : col.align === 'right' ? 'text-right' : 'text-left'
                                       }`}
                                     />
                                   </td>
-                                );
-                              })}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-
-                    {focusedBlockIndex === index && (
-                      <div className="flex items-center justify-between p-1.5 rounded-xl bg-cream-surface border border-cream-divider/70 text-[11px] animate-page-fade">
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={() => addTableRow(index)}
-                            className="px-2 py-1 rounded-lg bg-[#FAF8F5] border border-cream-divider/60 text-warm-text font-medium flex items-center gap-0.5 physics-bounce"
-                          >
-                            <span className="material-symbols-outlined text-[13px]">add</span>
-                            <span>{t('add_row')}</span>
-                          </button>
-                          <button
-                            onClick={() => removeTableRow(index)}
-                            disabled={block.cells.length <= 1}
-                            className="w-6 h-6 rounded-lg bg-[#FAF8F5] border border-cream-divider/60 text-warm-muted flex items-center justify-center disabled:opacity-30 physics-bounce"
-                          >
-                            <span className="material-symbols-outlined text-[13px]">remove</span>
-                          </button>
-                          <span className="h-3 w-[1px] bg-cream-divider mx-0.5" />
-                          <button
-                            onClick={() => addTableColumn(index)}
-                            className="px-2 py-1 rounded-lg bg-[#FAF8F5] border border-cream-divider/60 text-warm-text font-medium flex items-center gap-0.5 physics-bounce"
-                          >
-                            <span className="material-symbols-outlined text-[13px]">add</span>
-                            <span>{t('add_col')}</span>
-                          </button>
-                          <button
-                            onClick={() => removeTableColumn(index)}
-                            disabled={(block.cells[0]?.length || 0) <= 1}
-                            className="w-6 h-6 rounded-lg bg-[#FAF8F5] border border-cream-divider/60 text-warm-muted flex items-center justify-center disabled:opacity-30 physics-bounce"
-                          >
-                            <span className="material-symbols-outlined text-[13px]">remove</span>
-                          </button>
-                        </div>
-
-                        {activeTableCell && activeTableCell.blockIndex === index && (
-                          <div className="flex items-center gap-0.5 bg-[#FAF8F5] border border-cream-divider/60 rounded-lg p-0.5">
-                            <button
-                              onClick={() => setCellAlignment(index, activeTableCell.rowIndex, activeTableCell.colIndex, 'left')}
-                              className="w-5 h-5 flex items-center justify-center rounded text-warm-muted hover:text-warm-text"
-                            >
-                              <span className="material-symbols-outlined text-[13px]">format_align_left</span>
-                            </button>
-                            <button
-                              onClick={() => setCellAlignment(index, activeTableCell.rowIndex, activeTableCell.colIndex, 'center')}
-                              className="w-5 h-5 flex items-center justify-center rounded text-warm-muted hover:text-warm-text"
-                            >
-                              <span className="material-symbols-outlined text-[13px]">format_align_center</span>
-                            </button>
-                            <button
-                              onClick={() => setCellAlignment(index, activeTableCell.rowIndex, activeTableCell.colIndex, 'right')}
-                              className="w-5 h-5 flex items-center justify-center rounded text-warm-muted hover:text-warm-text"
-                            >
-                              <span className="material-symbols-outlined text-[13px]">format_align_right</span>
-                            </button>
-                          </div>
-                        )}
-
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={() => toggleTableBorder(index)}
-                            className={`p-1 rounded-lg transition-colors physics-bounce ${
-                              block.is_bordered ? 'text-warm-accent bg-warm-accent-light' : 'text-warm-muted'
-                            }`}
-                          >
-                            <span className="material-symbols-outlined text-[15px]">border_all</span>
-                          </button>
-                          <button
-                            onClick={() => toggleTableStriped(index)}
-                            className={`p-1 rounded-lg transition-colors physics-bounce ${
-                              block.is_striped ? 'text-warm-accent bg-warm-accent-light' : 'text-warm-muted'
-                            }`}
-                          >
-                            <span className="material-symbols-outlined text-[15px]">table_rows</span>
-                          </button>
-                        </div>
+                                ))}
+                                {rIdx === 0 ? (
+                                  <th
+                                    style={{ width: '32px', minWidth: '32px', maxWidth: '32px' }}
+                                    className={`w-8 min-w-[32px] max-w-[32px] p-0 text-center align-middle ${
+                                      block.is_bordered ? 'border-b border-cream-divider bg-cream-surface/60' : 'bg-cream-surface/30'
+                                    }`}
+                                  >
+                                    <button
+                                      onMouseDown={(e) => e.preventDefault()}
+                                      onClick={() => addTableColumn(index)}
+                                      className="w-full h-full min-h-[30px] flex items-center justify-center text-warm-muted hover:text-warm-accent active:scale-90 transition-transform"
+                                      title={t('add_col').replace(/^[+\-–]\s*/, '')}
+                                    >
+                                      <span className="material-symbols-outlined text-[15px]">add</span>
+                                    </button>
+                                  </th>
+                                ) : (
+                                  <td
+                                    style={{ width: '32px', minWidth: '32px', maxWidth: '32px' }}
+                                    className={`w-8 min-w-[32px] max-w-[32px] p-0 ${
+                                      block.is_bordered && rIdx < block.cells.length - 1 ? 'border-b border-cream-divider/30' : ''
+                                    }`}
+                                  />
+                                )}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
                       </div>
-                    )}
+
+                      <div
+                        className={`flex items-center justify-between px-3 py-1 bg-cream-surface/30 ${
+                          block.is_bordered ? 'border-t border-cream-divider' : ''
+                        }`}
+                      >
+                        <button
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => addTableRow(index)}
+                          className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium text-warm-muted hover:text-warm-accent active:scale-90 transition-transform"
+                        >
+                          <span className="material-symbols-outlined text-[14px]">add</span>
+                          <span>{t('add_row').replace(/^[+\-–]\s*/, '')}</span>
+                        </button>
+                        <span className="text-[10px] font-mono text-warm-subtle">
+                          {block.cells.length} × {block.cells[0]?.length || 0}
+                        </span>
+                      </div>
+                    </div>
                   </div>
                 )}
 
@@ -1379,6 +1537,8 @@ export const EditorView: React.FC<EditorViewProps> = ({
               {focusedBlockIndex === index && (
                 <div className="absolute right-0 -top-3 z-10 flex items-center gap-1 bg-[#FAF8F5] border border-cream-divider/80 px-1.5 py-0.5 rounded-full shadow-sm animate-page-fade">
                   <button
+                    onMouseDown={(e) => e.preventDefault()}
+                    onPointerDown={(e) => e.preventDefault()}
                     onClick={() => moveBlock(index, 'up')}
                     disabled={index === 0}
                     className="w-5 h-5 flex items-center justify-center text-warm-muted hover:text-warm-text disabled:opacity-25 physics-bounce"
@@ -1386,6 +1546,8 @@ export const EditorView: React.FC<EditorViewProps> = ({
                     <span className="material-symbols-outlined text-[13px]">arrow_upward</span>
                   </button>
                   <button
+                    onMouseDown={(e) => e.preventDefault()}
+                    onPointerDown={(e) => e.preventDefault()}
                     onClick={() => moveBlock(index, 'down')}
                     disabled={index === currentNote.blocks.length - 1}
                     className="w-5 h-5 flex items-center justify-center text-warm-muted hover:text-warm-text disabled:opacity-25 physics-bounce"
@@ -1393,6 +1555,8 @@ export const EditorView: React.FC<EditorViewProps> = ({
                     <span className="material-symbols-outlined text-[13px]">arrow_downward</span>
                   </button>
                   <button
+                    onMouseDown={(e) => e.preventDefault()}
+                    onPointerDown={(e) => e.preventDefault()}
                     onClick={() => removeBlock(index)}
                     className="w-5 h-5 flex items-center justify-center text-warm-muted hover:text-red-600 physics-bounce"
                   >
