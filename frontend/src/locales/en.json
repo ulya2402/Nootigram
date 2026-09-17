@@ -42,6 +42,7 @@
   "tab_text": "Text",
   "tab_lists": "Lists",
   "tab_quotes": "Quotes",
+  "tab_media": "Media",
   "tab_table": "Table",
   "tab_objects": "Objects",
   "tool_paragraph": "Paragraph",
@@ -80,5 +81,12 @@
   "bot_modal_title": "Activate Chat Bot",
   "bot_modal_desc": "Telegram requires you to open the chat bot once so it has permission to send notes to your private chat.",
   "bot_modal_later": "Later",
-  "bot_modal_open": "Open Chat Bot"
+  "bot_modal_open": "Open Chat Bot",
+  "tool_image": "Add Image",
+  "image_caption_placeholder": "Add an image caption...",
+  "layout_collage": "Collage",
+  "layout_slideshow": "Slideshow",
+  "add_second_image": "Add 2nd Photo",
+  "image_limit_title": "Max 2 images reached",
+  "image_uploading": "Uploading image..."
 }

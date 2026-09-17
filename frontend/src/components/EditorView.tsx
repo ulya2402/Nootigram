@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { NoteItem, ContentBlock, TaskItem, TableCell, TopicItem } from '../types';
+import { NoteItem, ContentBlock, TaskItem, TableCell, TopicItem, MediaImageItem } from '../types';
 import { t } from '../services/i18n';
 import { exportNoteToTelegram } from '../services/api';
+import { uploadToImgbb } from '../services/imgbb';
 
 interface EditorViewProps {
   note: NoteItem;
@@ -79,7 +80,16 @@ export const EditorView: React.FC<EditorViewProps> = ({
   const [historyIndex, setHistoryIndex] = useState<number>(0);
   const [focusedBlockIndex, setFocusedBlockIndex] = useState<number | null>(null);
   const [activeTableCell, setActiveTableCell] = useState<{ blockIndex: number; rowIndex: number; colIndex: number } | null>(null);
-  const [activeToolbarTab, setActiveToolbarTab] = useState<'text' | 'lists' | 'quotes' | 'table' | 'objects'>('text');
+  const [activeToolbarTab, setActiveToolbarTab] = useState<'text' | 'lists' | 'quotes' | 'media' | 'table' | 'objects'>('text');
+const [activeSlideIndices, setActiveSlideIndices] = useState<Record<string, number>>({});
+const [isUploadingGlobal, setIsUploadingGlobal] = useState<boolean>(false);
+const [uploadingBlockId, setUploadingBlockId] = useState<string | null>(null);
+const fileInputRef = useRef<HTMLInputElement>(null);
+const targetMediaBlockIndexRef = useRef<number | null>(null);
+
+const totalImageCount = currentNote.blocks.reduce((count, b) => {
+  return b.type === 'media' ? count + (b.images?.length || 0) : count;
+}, 0);
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [exportNotice, setExportNotice] = useState<string | null>(null);
   const [showToc, setShowToc] = useState<boolean>(false);
@@ -173,7 +183,134 @@ export const EditorView: React.FC<EditorViewProps> = ({
 
   const isMovingRef = useRef<boolean>(false);
 
-  
+  const triggerUploadNewImage = () => {
+  if (totalImageCount >= 2) {
+    triggerHaptic('medium');
+    window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('warning');
+    return;
+  }
+  triggerHaptic('light');
+  targetMediaBlockIndexRef.current = null;
+  fileInputRef.current?.click();
+};
+
+const triggerAddSecondImage = (blockIndex: number) => {
+  if (totalImageCount >= 2) {
+    triggerHaptic('medium');
+    window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('warning');
+    return;
+  }
+  triggerHaptic('light');
+  targetMediaBlockIndexRef.current = blockIndex;
+  fileInputRef.current?.click();
+};
+
+const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  e.target.value = '';
+
+  const targetIdx = targetMediaBlockIndexRef.current;
+  const tempImgId = `img-${Date.now()}`;
+  setIsUploadingGlobal(true);
+
+  if (targetIdx !== null && currentNote.blocks[targetIdx]?.type === 'media') {
+    setUploadingBlockId(currentNote.blocks[targetIdx].id);
+  }
+
+  try {
+    const result = await uploadToImgbb(file);
+    const newImgItem: MediaImageItem = {
+      id: tempImgId,
+      url: result.url,
+      delete_url: result.delete_url,
+    };
+
+    if (targetIdx !== null && currentNote.blocks[targetIdx]?.type === 'media') {
+      const existingBlock = currentNote.blocks[targetIdx] as Extract<ContentBlock, { type: 'media' }>;
+      const nextImages = [...existingBlock.images, newImgItem].slice(0, 2);
+      const nextBlock: ContentBlock = {
+        ...existingBlock,
+        layout: 'collage',
+        images: nextImages,
+      };
+      updateBlock(targetIdx, nextBlock, true);
+    } else {
+      const newBlockId = `b-media-${Date.now()}`;
+      const newBlock: ContentBlock = {
+        id: newBlockId,
+        type: 'media',
+        layout: 'single',
+        caption: '',
+        images: [newImgItem],
+      };
+      const trailingParagraph: ContentBlock = {
+        id: `p-${Date.now()}`,
+        type: 'paragraph',
+        text: '',
+      };
+
+      const targetPos = focusedBlockIndex !== null && focusedBlockIndex >= 0 && focusedBlockIndex < currentNote.blocks.length
+        ? focusedBlockIndex + 1
+        : currentNote.blocks.length;
+
+      const nextBlocks = [
+        ...currentNote.blocks.slice(0, targetPos),
+        newBlock,
+        trailingParagraph,
+        ...currentNote.blocks.slice(targetPos),
+      ];
+
+      persistChange({ ...currentNote, blocks: nextBlocks }, true);
+      setFocusedBlockIndex(targetPos);
+    }
+
+    window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('success');
+  } catch (err) {
+    console.error(`IMAGE_UPLOAD_FAILED: ${(err as Error).message}`);
+    window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('error');
+  } finally {
+    setIsUploadingGlobal(false);
+    setUploadingBlockId(null);
+    targetMediaBlockIndexRef.current = null;
+  }
+};
+
+const removeImageFromBlock = (blockIndex: number, imageIndex: number) => {
+  triggerHaptic('light');
+  const block = currentNote.blocks[blockIndex];
+  if (block.type !== 'media') return;
+  const nextImages = block.images.filter((_, i) => i !== imageIndex);
+  if (nextImages.length === 0) {
+    removeBlock(blockIndex);
+  } else {
+    updateBlock(
+      blockIndex,
+      {
+        ...block,
+        layout: 'single',
+        images: nextImages,
+      },
+      true
+    );
+  }
+};
+
+const toggleMediaLayout = (blockIndex: number, newLayout: 'collage' | 'slideshow') => {
+  triggerHaptic('light');
+  const block = currentNote.blocks[blockIndex];
+  if (block.type !== 'media') return;
+  updateBlock(blockIndex, { ...block, layout: newLayout }, true);
+};
+
+const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: number) => {
+  triggerHaptic('light');
+  setActiveSlideIndices((prev) => {
+    const current = prev[blockId] || 0;
+    const nextIndex = direction === 'next' ? (current + 1) % total : (current - 1 + total) % total;
+    return { ...prev, [blockId]: nextIndex };
+  });
+};
 
   const updateActiveFormats = useCallback(() => {
     const sel = window.getSelection();
@@ -482,11 +619,14 @@ export const EditorView: React.FC<EditorViewProps> = ({
     type: ContentBlock['type'],
     opts?: { size?: 1 | 2 | 3 | 4 | 5 | 6; style?: 'task' | 'bullet' | 'ordered' }
   ) => {
+    if (type === 'media') {
+      triggerUploadNewImage();
+      return;
+    }
     triggerHaptic('medium');
     const bId1 = `b-${Date.now()}-1`;
     const bId2 = `b-${Date.now()}-2`;
     let primaryBlock: ContentBlock;
-
     switch (type) {
       case 'heading':
         primaryBlock = { id: bId1, type: 'heading', size: opts?.size || 2, text: '' };
@@ -541,28 +681,26 @@ export const EditorView: React.FC<EditorViewProps> = ({
       case 'divider':
         primaryBlock = { id: bId1, type: 'divider' };
         break;
+      default:
+        primaryBlock = { id: bId1, type: 'paragraph', text: '' };
+        break;
     }
-
     const trailingParagraph: ContentBlock = {
       id: bId2,
       type: 'paragraph',
       text: '',
     };
-
     const targetIndex = focusedBlockIndex !== null && focusedBlockIndex >= 0 && focusedBlockIndex < currentNote.blocks.length
       ? focusedBlockIndex + 1
       : currentNote.blocks.length;
-
     const insertedBlocks = type === 'paragraph' ? [primaryBlock] : [primaryBlock, trailingParagraph];
     const nextBlocks = [
       ...currentNote.blocks.slice(0, targetIndex),
       ...insertedBlocks,
       ...currentNote.blocks.slice(targetIndex),
     ];
-
     persistChange({ ...currentNote, blocks: nextBlocks }, true);
     setFocusedBlockIndex(targetIndex);
-
     setTimeout(() => {
       blockElementRefs.current[bId1]?.scrollIntoView({
         behavior: 'smooth',
@@ -784,6 +922,13 @@ export const EditorView: React.FC<EditorViewProps> = ({
         });
       } else if (b.type === 'divider') {
         richBlocks.push({ type: 'divider' });
+      } else if (b.type === 'media' && b.images && b.images.length > 0) {
+        richBlocks.push({
+          type: 'media',
+          layout: b.layout || (b.images.length > 1 ? 'collage' : 'single'),
+          images: b.images.map((img) => img.url),
+          caption: b.caption || '',
+        });
       }
     });
 
@@ -801,6 +946,14 @@ export const EditorView: React.FC<EditorViewProps> = ({
       className="flex flex-col w-full h-full overflow-y-auto overflow-x-hidden px-6 animate-page-fade relative"
       style={{ paddingBottom: 'calc(var(--keyboard-inset, 0px) + 5rem)' }}
     >
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handleFileSelected}
+        className="opacity-0 absolute -z-10 w-0 h-0 pointer-events-none"
+        tabIndex={-1}
+      />
       <div className="sticky top-0 z-30 bg-[#FAF8F5]/95 safe-header-box pb-2 border-b border-cream-divider flex flex-col gap-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1">
@@ -888,7 +1041,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
         </div>
 
         <div className="flex items-center justify-between border-b border-cream-divider/40 pb-1 text-xs">
-          {(['text', 'lists', 'quotes', 'table', 'objects'] as const).map((tabKey) => {
+          {(['text', 'lists', 'quotes', 'media', 'table', 'objects'] as const).map((tabKey) => {
             const isActive = activeToolbarTab === tabKey;
             const labelKey = `tab_${tabKey}` as any;
             return (
@@ -959,29 +1112,48 @@ export const EditorView: React.FC<EditorViewProps> = ({
           )}
 
           {activeToolbarTab === 'quotes' && (
-            <>
-              <button
-                onClick={() => appendBlockWithParagraph('quote')}
-                className="px-2.5 py-1 rounded-full bg-cream-surface text-xs font-medium flex items-center gap-1 shrink-0 physics-bounce"
+  <>
+    <button
+      onClick={() => appendBlockWithParagraph('quote')}
+      className="px-2.5 py-1 rounded-full bg-cream-surface text-xs font-medium flex items-center gap-1 shrink-0 physics-bounce"
+    >
+      <span>{t('tool_quote_block')}</span>
+    </button>
+    <button
+      onClick={() => appendBlockWithParagraph('expandable_quote')}
+      className="px-2.5 py-1 rounded-full bg-cream-surface text-xs font-medium flex items-center gap-1 shrink-0 physics-bounce"
+    >
+      <span>{t('tool_quote_expand')}</span>
+    </button>
+    <button
+      onClick={() => appendBlockWithParagraph('pullquote')}
+      className="px-2.5 py-1 rounded-full bg-cream-surface text-xs font-medium flex items-center gap-1 shrink-0 physics-bounce"
+    >
+      <span>{t('tool_quote_pull')}</span>
+    </button>
+  </>
+)}
+{activeToolbarTab === 'media' && (
+  <div className="flex items-center gap-2">
+    <button
+                type="button"
+                onClick={() => appendBlockWithParagraph('media')}
+                disabled={totalImageCount >= 2 || isUploadingGlobal}
+                className="px-3 py-1 rounded-full bg-warm-accent text-white text-xs font-medium flex items-center gap-1.5 shrink-0 physics-bounce disabled:opacity-40"
               >
-                <span>{t('tool_quote_block')}</span>
-              </button>
-              <button
-                onClick={() => appendBlockWithParagraph('expandable_quote')}
-                className="px-2.5 py-1 rounded-full bg-cream-surface text-xs font-medium flex items-center gap-1 shrink-0 physics-bounce"
-              >
-                <span>{t('tool_quote_expand')}</span>
-              </button>
-              <button
-                onClick={() => appendBlockWithParagraph('pullquote')}
-                className="px-2.5 py-1 rounded-full bg-cream-surface text-xs font-medium flex items-center gap-1 shrink-0 physics-bounce"
-              >
-                <span>{t('tool_quote_pull')}</span>
-              </button>
-            </>
-          )}
-
-          {activeToolbarTab === 'table' && (
+      {isUploadingGlobal ? (
+        <div className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin-fast" />
+      ) : (
+        <span className="material-symbols-outlined text-[15px]">add_photo_alternate</span>
+      )}
+      <span>{isUploadingGlobal ? t('image_uploading') : t('tool_image')}</span>
+    </button>
+    <span className="text-[11px] font-mono text-warm-muted">
+      {totalImageCount}/2
+    </span>
+  </div>
+)}
+{activeToolbarTab === 'table' && (
             <button
               onClick={() => appendBlockWithParagraph('table')}
               className="px-3 py-1 rounded-full bg-warm-accent text-white text-xs font-medium flex items-center gap-1 shrink-0 physics-bounce"
@@ -1281,7 +1453,176 @@ export const EditorView: React.FC<EditorViewProps> = ({
                     </button>
                   </div>
                 )}
+                {block.type === 'media' && (
+                  <div className="flex flex-col gap-2 my-2 w-full min-w-0">
+                    {block.images.length === 2 && (
+                      <div className="flex items-center justify-between pb-1">
+                        <div className="flex items-center bg-cream-surface border border-cream-divider rounded-full p-0.5">
+                          <button
+                            type="button"
+                            onClick={() => toggleMediaLayout(index, 'collage')}
+                            className={`px-3 py-0.5 text-xs font-medium rounded-full transition-all duration-200 flex items-center gap-1 ${
+                              block.layout === 'collage'
+                                ? 'bg-warm-accent text-white'
+                                : 'text-warm-muted hover:text-warm-text'
+                            }`}
+                          >
+                            <span className="material-symbols-outlined text-[14px]">grid_view</span>
+                            <span>{t('layout_collage')}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => toggleMediaLayout(index, 'slideshow')}
+                            className={`px-3 py-0.5 text-xs font-medium rounded-full transition-all duration-200 flex items-center gap-1 ${
+                              block.layout === 'slideshow'
+                                ? 'bg-warm-accent text-white'
+                                : 'text-warm-muted hover:text-warm-text'
+                            }`}
+                          >
+                            <span className="material-symbols-outlined text-[14px]">view_carousel</span>
+                            <span>{t('layout_slideshow')}</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
 
+                    <div className="relative w-full rounded-xl overflow-hidden bg-cream-surface/60 border border-cream-divider">
+                      {block.layout === 'slideshow' && block.images.length === 2 ? (
+                        <div className="relative w-full flex flex-col items-center">
+                          <div className="relative w-full h-56 overflow-hidden">
+                            {block.images.map((img, imgIdx) => {
+                              const activeIdx = activeSlideIndices[block.id] || 0;
+                              const isCurrent = activeIdx === imgIdx;
+                              return (
+                                <div
+                                  key={img.id}
+                                  className={`absolute inset-0 transition-opacity duration-300 ease-out flex items-center justify-center ${
+                                    isCurrent ? 'opacity-100 z-10' : 'opacity-0 pointer-events-none z-0'
+                                  }`}
+                                >
+                                  <img
+                                    src={img.url}
+                                    alt="slideshow frame"
+                                    className="w-full h-full object-cover"
+                                    loading="lazy"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => removeImageFromBlock(index, imgIdx)}
+                                    className="absolute top-2 right-2 w-6 h-6 rounded-full bg-[#24201D]/75 text-white flex items-center justify-center text-xs hover:bg-red-600 transition-colors"
+                                  >
+                                    <span className="material-symbols-outlined text-[14px]">close</span>
+                                  </button>
+                                </div>
+                              );
+                            })}
+                          </div>
+                          <div className="w-full flex items-center justify-between px-3 py-1.5 bg-cream-surface/80 border-t border-cream-divider">
+                            <button
+                              type="button"
+                              onClick={() => handleSlideNav(block.id, 'prev', block.images.length)}
+                              className="w-6 h-6 rounded-full flex items-center justify-center text-warm-text hover:bg-cream-divider transition-colors"
+                            >
+                              <span className="material-symbols-outlined text-[16px]">chevron_left</span>
+                            </button>
+                            <div className="flex items-center gap-1.5">
+                              {block.images.map((_, dotIdx) => {
+                                const activeIdx = activeSlideIndices[block.id] || 0;
+                                return (
+                                  <span
+                                    key={dotIdx}
+                                    className={`w-2 h-2 rounded-full transition-colors ${
+                                      activeIdx === dotIdx ? 'bg-warm-accent' : 'bg-cream-divider'
+                                    }`}
+                                  />
+                                );
+                              })}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleSlideNav(block.id, 'next', block.images.length)}
+                              className="w-6 h-6 rounded-full flex items-center justify-center text-warm-text hover:bg-cream-divider transition-colors"
+                            >
+                              <span className="material-symbols-outlined text-[16px]">chevron_right</span>
+                            </button>
+                          </div>
+                        </div>
+                      ) : block.layout === 'collage' && block.images.length === 2 ? (
+                        <div className="grid grid-cols-2 gap-1.5 p-1.5 transition-all duration-200">
+                          {block.images.map((img, imgIdx) => (
+                            <div key={img.id} className="relative h-44 rounded-lg overflow-hidden group/img">
+                              <img
+                                src={img.url}
+                                alt="collage thumb"
+                                className="w-full h-full object-cover"
+                                loading="lazy"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => removeImageFromBlock(index, imgIdx)}
+                                className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-[#24201D]/75 text-white flex items-center justify-center text-xs hover:bg-red-600 transition-colors"
+                              >
+                                <span className="material-symbols-outlined text-[14px]">close</span>
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="relative w-full max-h-72 overflow-hidden flex items-center justify-center">
+                          {block.images[0] && (
+                            <>
+                              <img
+                                src={block.images[0].url}
+                                alt="single preview"
+                                className="w-full max-h-72 object-cover rounded-xl"
+                                loading="lazy"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => removeImageFromBlock(index, 0)}
+                                className="absolute top-2 right-2 w-6 h-6 rounded-full bg-[#24201D]/75 text-white flex items-center justify-center text-xs hover:bg-red-600 transition-colors"
+                              >
+                                <span className="material-symbols-outlined text-[14px]">close</span>
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      )}
+
+                      {uploadingBlockId === block.id && (
+                        <div className="absolute inset-0 bg-[#FAF8F5]/85 flex items-center justify-center z-20">
+                          <div className="flex items-center gap-2 text-xs font-medium text-warm-accent">
+                            <div className="w-4 h-4 border-2 border-warm-accent/30 border-t-warm-accent rounded-full animate-spin-fast" />
+                            <span>{t('image_uploading')}</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {block.images.length === 1 && totalImageCount < 2 && (
+                      <button
+                        type="button"
+                        onClick={() => triggerAddSecondImage(index)}
+                        disabled={isUploadingGlobal}
+                        className="self-start text-xs font-medium text-warm-accent flex items-center gap-1 px-2.5 py-1 rounded-full bg-cream-surface border border-cream-divider physics-bounce disabled:opacity-40"
+                      >
+                        <span className="material-symbols-outlined text-[14px]">add</span>
+                        <span>{t('add_second_image')}</span>
+                      </button>
+                    )}
+
+                    <div className="border-b border-cream-divider/70 pb-1">
+                      <input
+                        type="text"
+                        value={block.caption || ''}
+                        placeholder={t('image_caption_placeholder')}
+                        onFocus={() => setFocusedBlockIndex(index)}
+                        onChange={(e) => updateBlock(index, { ...block, caption: e.target.value })}
+                        className="w-full text-xs italic text-warm-muted bg-transparent border-none focus:outline-none placeholder:text-warm-subtle"
+                      />
+                    </div>
+                  </div>
+                )}
                 {block.type === 'table' && (
                   <div className="flex flex-col gap-1.5 my-3 w-full min-w-0 max-w-full">
                     <div
@@ -1568,6 +1909,8 @@ export const EditorView: React.FC<EditorViewProps> = ({
           ))}
         </div>
       </div>
+
+      
 
       {isEditorActive &&
         createPortal(

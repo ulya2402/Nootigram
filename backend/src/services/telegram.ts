@@ -163,6 +163,18 @@ export class TelegramService {
       } else if (b.type === 'details') {
         const detText = b.blocks && b.blocks[0] && 'text' in b.blocks[0] ? (b.blocks[0] as any).text : '';
         html += `<details><summary>${this.formatInlineHtml(b.summary)}</summary>${this.formatInlineHtml(detText)}</details>\n\n`;
+      } else if (b.type === 'media') {
+        const captionText = b.caption ? this.formatInlineHtml(b.caption) : '';
+        const captionTag = captionText ? `<figcaption>${captionText}</figcaption>` : '';
+        if (b.layout === 'slideshow' && b.images.length > 1) {
+          const imgs = b.images.map((src) => `<img src="${src}"/>`).join('');
+          html += `<tg-slideshow>${imgs}${captionTag}</tg-slideshow>\n\n`;
+        } else if (b.layout === 'collage' && b.images.length > 1) {
+          const imgs = b.images.map((src) => `<img src="${src}"/>`).join('');
+          html += `<tg-collage>${imgs}${captionTag}</tg-collage>\n\n`;
+        } else if (b.images.length > 0) {
+          html += `<figure><img src="${b.images[0]}"/>${captionTag}</figure>\n\n`;
+        }
       }
     }
     return html.trim();
@@ -211,6 +223,11 @@ export class TelegramService {
       .replace(/<aside>(.*?)<\/aside>/gi, '<blockquote>$1</blockquote>\n\n')
       .replace(/<tg-math-block>(.*?)<\/tg-math-block>/gi, '<pre><code>$1</code></pre>\n\n')
       .replace(/<hr\s*[\/]?>/gi, '— — —\n\n')
+      .replace(/<tg-collage>([\s\S]*?)<\/tg-collage>/gi, '$1\n\n')
+      .replace(/<tg-slideshow>([\s\S]*?)<\/tg-slideshow>/gi, '$1\n\n')
+      .replace(/<figure>([\s\S]*?)<\/figure>/gi, '$1\n\n')
+      .replace(/<figcaption>(.*?)<\/figcaption>/gi, '<i>$1</i>\n')
+      .replace(/<img[^>]*src="([^"]*)"[^>]*>/gi, '<a href="$1">&#128444; Photo</a>\n')
       .replace(/<li><input type="checkbox" checked>(.*?)<\/li>/gi, '☑ $1\n')
       .replace(/<li><input type="checkbox">(.*?)<\/li>/gi, '☐ $1\n')
       .replace(/<li>(.*?)<\/li>/gi, '• $1\n')

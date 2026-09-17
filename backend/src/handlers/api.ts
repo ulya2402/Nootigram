@@ -231,6 +231,72 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
       return new Response(JSON.stringify({ error: 'EXPORT_FAILED' }), { status: 500 });
     }
   }
+  if (request.method === 'POST' && path === '/api/media/upload') {
+    try {
+      const keys = (env.IMGBB_API_KEYS || '')
+        .split(',')
+        .map((k) => k.trim())
+        .filter(Boolean);
+
+      if (keys.length === 0) {
+        console.error('IMGBB_NOT_CONFIGURED: IMGBB_API_KEYS is missing in env');
+        return new Response(JSON.stringify({ error: 'IMGBB_NOT_CONFIGURED' }), { status: 500 });
+      }
+
+      const formData = await request.formData();
+      const imageFile = formData.get('image') as unknown as { arrayBuffer?: () => Promise<ArrayBuffer> } | null;
+      if (!imageFile || typeof imageFile.arrayBuffer !== 'function') {
+        return new Response(JSON.stringify({ error: 'INVALID_FILE' }), { status: 400 });
+      }
+
+      const fileBuffer = await imageFile.arrayBuffer();
+      const imageBlob = new Blob([fileBuffer]);
+
+      let lastError = '';
+      for (let i = 0; i < keys.length; i++) {
+        const currentKey = keys[i];
+        try {
+          const imgbbForm = new FormData();
+          imgbbForm.append('image', imageBlob, 'upload.jpg');
+
+          const imgbbRes = await fetch(`https://api.imgbb.com/1/upload?key=${currentKey}`, {
+            method: 'POST',
+            body: imgbbForm,
+          });
+
+          const data = (await imgbbRes.json()) as {
+            success?: boolean;
+            data?: { url: string; delete_url?: string };
+            error?: { message: string };
+          };
+
+          if (imgbbRes.ok && data.success && data.data?.url) {
+            return new Response(
+              JSON.stringify({
+                success: true,
+                url: data.data.url,
+                delete_url: data.data.delete_url,
+              }),
+              {
+                headers: { 'Content-Type': 'application/json' },
+              }
+            );
+          }
+          lastError = data.error?.message || `HTTP_${imgbbRes.status}`;
+          console.warn(`IMGBB_KEY_FAILED: index=${i}, error=${lastError}`);
+        } catch (err) {
+          lastError = (err as Error).message;
+          console.warn(`IMGBB_REQ_EXCEPTION: index=${i}, error=${lastError}`);
+        }
+      }
+
+      console.error(`IMGBB_ALL_KEYS_FAILED: ${lastError}`);
+      return new Response(JSON.stringify({ error: 'ALL_KEYS_EXHAUSTED' }), { status: 502 });
+    } catch (error) {
+      console.error(`API_MEDIA_UPLOAD_ERROR: ${(error as Error).message}`);
+      return new Response(JSON.stringify({ error: 'UPLOAD_FAILED' }), { status: 500 });
+    }
+  }
 
   return new Response(JSON.stringify({ error: 'NOT_FOUND' }), { status: 404 });
 }

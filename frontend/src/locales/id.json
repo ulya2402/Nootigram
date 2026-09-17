@@ -42,6 +42,7 @@
   "tab_text": "Teks",
   "tab_lists": "Daftar",
   "tab_quotes": "Kutipan",
+  "tab_media": "Media",
   "tab_table": "Tabel",
   "tab_objects": "Objek",
   "tool_paragraph": "Paragraf",
@@ -80,5 +81,12 @@
   "bot_modal_title": "Aktifkan Chat Bot",
   "bot_modal_desc": "Telegram mewajibkan Anda membuka chat bot satu kali terlebih dahulu agar bot diizinkan mengirimkan catatan ke pesan pribadi Anda.",
   "bot_modal_later": "Nanti",
-  "bot_modal_open": "Buka Chat Bot"
+  "bot_modal_open": "Buka Chat Bot",
+  "tool_image": "Tambah Gambar",
+  "image_caption_placeholder": "Tulis keterangan gambar...",
+  "layout_collage": "Kolase",
+  "layout_slideshow": "Slide",
+  "add_second_image": "Tambah Gambar ke-2",
+  "image_limit_title": "Maksimal 2 gambar tercapai",
+  "image_uploading": "Mengunggah gambar..."
 }

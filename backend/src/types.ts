@@ -3,6 +3,7 @@ export interface Env {
   TELEGRAM_BOT_TOKEN: string;
   WEBAPP_URL: string;
   ENVIRONMENT?: string;
+  IMGBB_API_KEYS?: string;
 }
 
 export type InputRichBlock =
@@ -22,11 +23,17 @@ export type InputRichBlock =
       is_compact?: boolean;
       caption?: string;
     }
-  | { 
-      type: 'list'; 
-      items: { label?: string; blocks: InputRichBlock[]; has_checkbox?: boolean; is_checked?: boolean }[] 
-    }
-  | { type: 'details'; summary: string; blocks: InputRichBlock[]; is_open?: boolean };
+  | {
+       type: 'list';
+       items: { label?: string; blocks: InputRichBlock[]; has_checkbox?: boolean; is_checked?: boolean }[];
+     }
+  | { type: 'details'; summary: string; blocks: InputRichBlock[]; is_open?: boolean }
+  | {
+       type: 'media';
+       layout?: 'single' | 'collage' | 'slideshow';
+       images: string[];
+       caption?: string;
+     };
 
 export interface InputRichMessage {
   blocks?: InputRichBlock[];

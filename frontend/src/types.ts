@@ -16,6 +16,12 @@ export interface TopicItem {
   is_default?: boolean;
 }
 
+export interface MediaImageItem {
+  id: string;
+  url: string;
+  delete_url?: string;
+}
+
 export type ContentBlock =
   | { id: string; type: 'paragraph'; text: string }
   | { id: string; type: 'heading'; size: 1 | 2 | 3 | 4 | 5 | 6; text: string }
@@ -35,7 +41,14 @@ export type ContentBlock =
   | { id: string; type: 'code'; text: string; language?: string }
   | { id: string; type: 'math'; expression: string }
   | { id: string; type: 'details'; summary: string; text: string }
-  | { id: string; type: 'divider' };
+  | { id: string; type: 'divider' }
+  | {
+      id: string;
+      type: 'media';
+      layout: 'single' | 'collage' | 'slideshow';
+      images: MediaImageItem[];
+      caption?: string;
+    };
 
 export interface NoteItem {
   id: string;
