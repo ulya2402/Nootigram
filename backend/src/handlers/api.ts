@@ -183,38 +183,17 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
     try {
       const payload = (await request.json()) as { note_id: string; note?: NotePayload };
       let blocks: any[] = [];
-
       if (payload.note && payload.note.blocks) {
         blocks = payload.note.blocks;
-        await env.DB.prepare(`
-          INSERT INTO notes (id, telegram_id, category, title, content_raw, blocks_json, is_pinned, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-          ON CONFLICT(id) DO UPDATE SET
-            title = excluded.title,
-            blocks_json = excluded.blocks_json,
-            updated_at = CURRENT_TIMESTAMP
-        `)
-          .bind(
-            payload.note.id,
-            userId,
-            payload.note.category,
-            payload.note.title,
-            payload.note.content_raw || '',
-            JSON.stringify(payload.note.blocks),
-            payload.note.is_pinned ? 1 : 0
-          )
-          .run();
       } else {
         const row = await env.DB.prepare('SELECT * FROM notes WHERE id = ? AND telegram_id = ?')
           .bind(payload.note_id, userId)
           .first();
-
         if (!row) {
           return new Response(JSON.stringify({ error: 'NOTE_NOT_FOUND' }), { status: 404 });
         }
         blocks = JSON.parse(row.blocks_json as string);
       }
-
       const sendResult = await telegram.sendRichMessage(userId, { blocks });
       if (!sendResult.ok && sendResult.errorCode === 403) {
         const botUsername = await telegram.getBotUsername();

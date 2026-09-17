@@ -22,6 +22,19 @@ function extractSnippet(note: NoteItem): string {
   return (note.content_raw || '').replace(/<[^>]*>/g, '').trim();
 }
 
+function getNoteMedia(note: NoteItem): { url: string; count: number } | null {
+  for (const block of note.blocks) {
+    if (block.type === 'media' && 'images' in block && Array.isArray(block.images) && block.images.length > 0) {
+      const firstImg: any = block.images[0];
+      const resolvedUrl = typeof firstImg === 'string' ? firstImg : firstImg?.url;
+      if (resolvedUrl) {
+        return { url: resolvedUrl, count: block.images.length };
+      }
+    }
+  }
+  return null;
+}
+
 export const HomeView: React.FC<HomeViewProps> = ({
   userName,
   notes,
@@ -297,13 +310,14 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   )}
 
                   <div className="flex-1 flex flex-col gap-1 min-w-0">
-                    <div className="flex items-baseline justify-between gap-3">
+                    <div className="flex items-center justify-between gap-2">
                       <h4 className="text-base font-semibold text-warm-text leading-snug truncate">
                         {note.title || t('title_placeholder')}
                       </h4>
                       {!isSelectMode && (
-                        <div className="flex items-center gap-1 shrink-0">
+                        <div className="flex items-center gap-0.5 shrink-0 -mr-1">
                           <button
+                            type="button"
                             onClick={(e) => {
                               e.stopPropagation();
                               triggerHaptic();
@@ -312,7 +326,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                             className="w-7 h-7 flex items-center justify-center rounded-full text-warm-subtle hover:text-warm-accent hover:bg-cream-surface transition-colors"
                           >
                             <span
-                              className={`material-symbols-outlined text-[18px] ${
+                              className={`material-symbols-outlined text-[18px] leading-none ${
                                 note.is_favorite ? 'text-warm-accent' : ''
                               }`}
                               style={{ fontVariationSettings: note.is_favorite ? "'FILL' 1" : "'FILL' 0" }}
@@ -321,6 +335,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                             </span>
                           </button>
                           <button
+                            type="button"
                             onClick={(e) => {
                               e.stopPropagation();
                               triggerHaptic('medium');
@@ -330,24 +345,49 @@ export const HomeView: React.FC<HomeViewProps> = ({
                             }}
                             className="w-7 h-7 flex items-center justify-center rounded-full text-warm-subtle hover:text-red-600 hover:bg-cream-surface transition-colors"
                           >
-                            <span className="material-symbols-outlined text-[17px]">delete</span>
+                            <span className="material-symbols-outlined text-[18px] leading-none">delete</span>
                           </button>
                         </div>
                       )}
                     </div>
-                    {snippet && (
-                      <p className="text-sm text-warm-muted leading-relaxed line-clamp-2">
-                        {snippet}
-                      </p>
-                    )}
-                    <div className="flex items-center gap-2 mt-0.5 text-xs text-warm-muted">
-                      <span className="font-medium text-warm-accent uppercase text-[10px]">
-                        {categoryObj ? categoryObj.name : note.category}
-                      </span>
-                      <span>•</span>
-                      <span className="text-[11px] font-mono text-warm-subtle">
-                        {formatRelativeTime(note.updated_at_str)}
-                      </span>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex-1 min-w-0 flex flex-col gap-1">
+                        {snippet && (
+                          <p className="text-sm text-warm-muted leading-relaxed line-clamp-2">
+                            {snippet}
+                          </p>
+                        )}
+                        <div className="flex items-center gap-2 mt-0.5 text-xs text-warm-muted">
+                          <span className="font-medium text-warm-accent uppercase text-[10px]">
+                            {categoryObj ? categoryObj.name : note.category}
+                          </span>
+                          <span>•</span>
+                          <span className="text-[11px] font-mono text-warm-subtle">
+                            {formatRelativeTime(note.updated_at_str)}
+                          </span>
+                        </div>
+                      </div>
+                      {(() => {
+                        const media = getNoteMedia(note);
+                        if (!media) return null;
+                        return (
+                          <div className="relative w-12 h-12 shrink-0 rounded-lg overflow-hidden bg-cream-surface border border-cream-divider/80">
+                            <img
+                              src={media.url}
+                              alt=""
+                              loading="lazy"
+                              decoding="async"
+                              referrerPolicy="no-referrer"
+                              className="w-full h-full object-cover"
+                            />
+                            {media.count > 1 && (
+                              <span className="absolute bottom-0.5 right-0.5 px-1 py-0.2 rounded bg-[#24201D]/75 text-[9px] font-mono text-white leading-none">
+                                {media.count}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
                 </article>

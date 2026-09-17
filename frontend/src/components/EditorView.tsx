@@ -54,8 +54,37 @@ export const EditorView: React.FC<EditorViewProps> = ({
     if (!rawBlocks || rawBlocks.length === 0) {
       return [{ id: `p-${Date.now()}`, type: 'paragraph', text: '' }];
     }
-    return rawBlocks.map((b, idx) => {
+    return rawBlocks.map((b: any, idx) => {
       const id = b.id || `block-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 7)}`;
+      if (b.type === 'media') {
+        const rawImages = Array.isArray(b.images) ? b.images : [];
+        const normalizedImages: MediaImageItem[] = rawImages
+          .map((img: any, imgIdx: number) => {
+            if (typeof img === 'string') {
+              return { id: `img-${Date.now()}-${imgIdx}`, url: img };
+            }
+            return {
+              id: img?.id || `img-${Date.now()}-${imgIdx}`,
+              url: img?.url || '',
+              delete_url: img?.delete_url,
+            };
+          })
+          .filter((img: MediaImageItem) => Boolean(img.url));
+        return {
+          id,
+          type: 'media',
+          layout: b.layout || (normalizedImages.length > 1 ? 'collage' : 'single'),
+          images: normalizedImages,
+          caption: b.caption || '',
+        };
+      }
+      if (b.type === 'blockquote') {
+        const text = b.blocks && b.blocks[0] && b.blocks[0].text ? b.blocks[0].text : (b.text || '');
+        return { id, type: 'quote', text, credit: b.credit || '' };
+      }
+      if (b.type === 'pre') {
+        return { id, type: 'code', text: b.text || '', language: b.language || 'javascript' };
+      }
       if (b.type === 'list') {
         const hasTaskStyle = b.style === 'task' || (!b.style && b.items?.some((i: any) => i.has_checkbox || i.is_checked !== undefined));
         const resolvedStyle = hasTaskStyle ? 'task' : (b.style || 'bullet');
@@ -63,7 +92,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
           ...b,
           id,
           style: resolvedStyle,
-          items: (b.items || []).map((it) => ({
+          items: (b.items || []).map((it: any) => ({
             id: it.id || `task-${Date.now()}-${Math.random()}`,
             text: it.text || '',
             is_checked: Boolean(it.is_checked),
@@ -956,53 +985,51 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
       />
       <div className="sticky top-0 z-30 bg-[#FAF8F5]/95 safe-header-box pb-2 border-b border-cream-divider flex flex-col gap-2">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1.5">
             <button
               onClick={() => {
                 triggerHaptic();
                 setShowToc(!showToc);
               }}
-              className={`h-7 px-2.5 rounded-full border text-xs font-medium flex items-center gap-1 physics-bounce ${
+              className={`w-7 h-7 rounded-full flex items-center justify-center border transition-all active:scale-95 ${
                 showToc
-                  ? 'bg-warm-accent text-white border-warm-accent'
-                  : 'bg-cream-surface text-warm-text border-cream-divider'
+                  ? 'bg-warm-accent text-white border-warm-accent shadow-xs'
+                  : 'bg-cream-surface/80 text-warm-muted border-cream-divider/70 hover:text-warm-text'
               }`}
             >
-              <span className="material-symbols-outlined text-[15px]">toc</span>
-              <span>{t('toc_title')}</span>
+              <span className="material-symbols-outlined text-[16px]">toc</span>
             </button>
-            <div className="flex items-center bg-cream-surface rounded-full border border-cream-divider px-0.5">
+            <div className="flex items-center bg-cream-surface/80 rounded-full border border-cream-divider/70 p-0.5">
               <button
                 onClick={handleUndo}
                 disabled={historyIndex <= 0}
-                className="w-6 h-6 flex items-center justify-center text-warm-text disabled:opacity-30 physics-bounce"
+                className="w-6 h-6 rounded-full flex items-center justify-center text-warm-muted hover:text-warm-text disabled:opacity-20 active:scale-90 transition-transform"
               >
-                <span className="material-symbols-outlined text-[15px]">undo</span>
+                <span className="material-symbols-outlined text-[14px]">undo</span>
               </button>
               <button
                 onClick={handleRedo}
                 disabled={historyIndex >= history.length - 1}
-                className="w-6 h-6 flex items-center justify-center text-warm-text disabled:opacity-30 physics-bounce"
+                className="w-6 h-6 rounded-full flex items-center justify-center text-warm-muted hover:text-warm-text disabled:opacity-20 active:scale-90 transition-transform"
               >
-                <span className="material-symbols-outlined text-[15px]">redo</span>
+                <span className="material-symbols-outlined text-[14px]">redo</span>
               </button>
             </div>
           </div>
-
           <div className="flex items-center gap-1.5">
             <button
               onClick={handleExport}
               disabled={isExporting}
-              className="h-7 px-3 rounded-full bg-warm-text text-[#FAF8F5] text-xs font-medium flex items-center gap-1.5 physics-bounce min-w-[70px] justify-center"
+              className="h-7 px-3 rounded-full bg-warm-text text-[#FAF8F5] text-xs font-medium flex items-center gap-1.5 active:scale-95 transition-all disabled:opacity-80"
             >
               {isExporting ? (
                 <>
-                  <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin-fast" />
-                  <span>{t('exporting')}</span>
+                  <div className="w-2.5 h-2.5 rounded-full border-[1.5px] border-white/20 border-t-white animate-spin" />
+                  <span className="text-[11px] font-normal">{t('exporting')}</span>
                 </>
               ) : (
                 <>
-                  <span className="material-symbols-outlined text-[14px]">send</span>
+                  <span className="material-symbols-outlined text-[13px]">ios_share</span>
                   <span>{exportNotice || t('export_rich')}</span>
                 </>
               )}
@@ -1014,14 +1041,13 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                   onDelete(currentNote.id);
                 }
               }}
-              className="w-7 h-7 flex items-center justify-center text-warm-muted hover:text-red-600 physics-bounce"
+              className="w-7 h-7 rounded-full flex items-center justify-center text-warm-subtle hover:text-red-600 active:scale-90 transition-all"
             >
-              <span className="material-symbols-outlined text-[18px]">delete</span>
+              <span className="material-symbols-outlined text-[16px]">delete_outline</span>
             </button>
           </div>
         </div>
-
-        <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 border-t border-cream-divider/40">
+        <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-0.5">
           {topics.map((cat) => (
             <button
               key={cat.id}
@@ -1029,10 +1055,10 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                 triggerHaptic();
                 persistChange({ ...currentNote, category: cat.id }, true);
               }}
-              className={`text-[10px] px-2.5 py-0.5 rounded font-medium uppercase tracking-wider shrink-0 transition-colors ${
+              className={`text-[10px] px-2.5 py-0.5 rounded-full font-medium uppercase tracking-wider shrink-0 transition-colors ${
                 currentNote.category === cat.id
                   ? 'bg-warm-accent text-white'
-                  : 'bg-cream-surface text-warm-muted'
+                  : 'text-warm-muted hover:text-warm-text hover:bg-cream-surface/60'
               }`}
             >
               {cat.name}
@@ -1495,99 +1521,102 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                               const isCurrent = activeIdx === imgIdx;
                               return (
                                 <div
-                                  key={img.id}
-                                  className={`absolute inset-0 transition-opacity duration-300 ease-out flex items-center justify-center ${
-                                    isCurrent ? 'opacity-100 z-10' : 'opacity-0 pointer-events-none z-0'
-                                  }`}
-                                >
-                                  <img
-                                    src={img.url}
-                                    alt="slideshow frame"
-                                    className="w-full h-full object-cover"
-                                    loading="lazy"
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() => removeImageFromBlock(index, imgIdx)}
-                                    className="absolute top-2 right-2 w-6 h-6 rounded-full bg-[#24201D]/75 text-white flex items-center justify-center text-xs hover:bg-red-600 transition-colors"
-                                  >
-                                    <span className="material-symbols-outlined text-[14px]">close</span>
-                                  </button>
-                                </div>
-                              );
-                            })}
-                          </div>
-                          <div className="w-full flex items-center justify-between px-3 py-1.5 bg-cream-surface/80 border-t border-cream-divider">
-                            <button
-                              type="button"
-                              onClick={() => handleSlideNav(block.id, 'prev', block.images.length)}
-                              className="w-6 h-6 rounded-full flex items-center justify-center text-warm-text hover:bg-cream-divider transition-colors"
-                            >
-                              <span className="material-symbols-outlined text-[16px]">chevron_left</span>
-                            </button>
-                            <div className="flex items-center gap-1.5">
-                              {block.images.map((_, dotIdx) => {
-                                const activeIdx = activeSlideIndices[block.id] || 0;
-                                return (
-                                  <span
-                                    key={dotIdx}
-                                    className={`w-2 h-2 rounded-full transition-colors ${
-                                      activeIdx === dotIdx ? 'bg-warm-accent' : 'bg-cream-divider'
+                                    key={img.id}
+                                    className={`absolute inset-0 transition-opacity duration-300 ease-out flex items-center justify-center ${
+                                      isCurrent ? 'opacity-100 z-10' : 'opacity-0 pointer-events-none z-0'
                                     }`}
-                                  />
+                                  >
+                                    <img
+                                      src={img.url}
+                                      alt="slideshow frame"
+                                      className="w-full h-full object-cover"
+                                      loading="lazy"
+                                      referrerPolicy="no-referrer"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => removeImageFromBlock(index, imgIdx)}
+                                      className="absolute top-2 right-2 w-6 h-6 rounded-full bg-[#24201D]/75 text-white flex items-center justify-center text-xs hover:bg-red-600 transition-colors"
+                                    >
+                                      <span className="material-symbols-outlined text-[14px]">close</span>
+                                    </button>
+                                  </div>
                                 );
                               })}
                             </div>
-                            <button
-                              type="button"
-                              onClick={() => handleSlideNav(block.id, 'next', block.images.length)}
-                              className="w-6 h-6 rounded-full flex items-center justify-center text-warm-text hover:bg-cream-divider transition-colors"
-                            >
-                              <span className="material-symbols-outlined text-[16px]">chevron_right</span>
-                            </button>
-                          </div>
-                        </div>
-                      ) : block.layout === 'collage' && block.images.length === 2 ? (
-                        <div className="grid grid-cols-2 gap-1.5 p-1.5 transition-all duration-200">
-                          {block.images.map((img, imgIdx) => (
-                            <div key={img.id} className="relative h-44 rounded-lg overflow-hidden group/img">
-                              <img
-                                src={img.url}
-                                alt="collage thumb"
-                                className="w-full h-full object-cover"
-                                loading="lazy"
-                              />
+                            <div className="w-full flex items-center justify-between px-3 py-1.5 bg-cream-surface/80 border-t border-cream-divider">
                               <button
                                 type="button"
-                                onClick={() => removeImageFromBlock(index, imgIdx)}
-                                className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-[#24201D]/75 text-white flex items-center justify-center text-xs hover:bg-red-600 transition-colors"
+                                onClick={() => handleSlideNav(block.id, 'prev', block.images.length)}
+                                className="w-6 h-6 rounded-full flex items-center justify-center text-warm-text hover:bg-cream-divider transition-colors"
                               >
-                                <span className="material-symbols-outlined text-[14px]">close</span>
+                                <span className="material-symbols-outlined text-[16px]">chevron_left</span>
+                              </button>
+                              <div className="flex items-center gap-1.5">
+                                {block.images.map((_, dotIdx) => {
+                                  const activeIdx = activeSlideIndices[block.id] || 0;
+                                  return (
+                                    <span
+                                      key={dotIdx}
+                                      className={`w-2 h-2 rounded-full transition-colors ${
+                                        activeIdx === dotIdx ? 'bg-warm-accent' : 'bg-cream-divider'
+                                      }`}
+                                    />
+                                  );
+                                })}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleSlideNav(block.id, 'next', block.images.length)}
+                                className="w-6 h-6 rounded-full flex items-center justify-center text-warm-text hover:bg-cream-divider transition-colors"
+                              >
+                                <span className="material-symbols-outlined text-[16px]">chevron_right</span>
                               </button>
                             </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="relative w-full max-h-72 overflow-hidden flex items-center justify-center">
-                          {block.images[0] && (
-                            <>
-                              <img
-                                src={block.images[0].url}
-                                alt="single preview"
-                                className="w-full max-h-72 object-cover rounded-xl"
-                                loading="lazy"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => removeImageFromBlock(index, 0)}
-                                className="absolute top-2 right-2 w-6 h-6 rounded-full bg-[#24201D]/75 text-white flex items-center justify-center text-xs hover:bg-red-600 transition-colors"
-                              >
-                                <span className="material-symbols-outlined text-[14px]">close</span>
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      )}
+                          </div>
+                        ) : block.layout === 'collage' && block.images.length === 2 ? (
+                          <div className="grid grid-cols-2 gap-1.5 p-1.5 transition-all duration-200">
+                            {block.images.map((img, imgIdx) => (
+                              <div key={img.id} className="relative h-44 rounded-lg overflow-hidden group/img">
+                                <img
+                                  src={img.url}
+                                  alt="collage thumb"
+                                  className="w-full h-full object-cover"
+                                  loading="lazy"
+                                  referrerPolicy="no-referrer"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => removeImageFromBlock(index, imgIdx)}
+                                  className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-[#24201D]/75 text-white flex items-center justify-center text-xs hover:bg-red-600 transition-colors"
+                                >
+                                  <span className="material-symbols-outlined text-[14px]">close</span>
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="relative w-full max-h-72 overflow-hidden flex items-center justify-center">
+                            {block.images[0] && (
+                              <>
+                                <img
+                                  src={block.images[0].url}
+                                  alt="single preview"
+                                  className="w-full max-h-72 object-cover rounded-xl"
+                                  loading="lazy"
+                                  referrerPolicy="no-referrer"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => removeImageFromBlock(index, 0)}
+                                  className="absolute top-2 right-2 w-6 h-6 rounded-full bg-[#24201D]/75 text-white flex items-center justify-center text-xs hover:bg-red-600 transition-colors"
+                                >
+                                  <span className="material-symbols-outlined text-[14px]">close</span>
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        )}
 
                       {uploadingBlockId === block.id && (
                         <div className="absolute inset-0 bg-[#FAF8F5]/85 flex items-center justify-center z-20">
