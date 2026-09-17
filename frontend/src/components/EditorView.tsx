@@ -1070,6 +1070,13 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
     updateBlock(tableIndex, { ...tableBlock, is_striped: !tableBlock.is_striped }, true);
   };
 
+  const toggleTableCompact = (tableIndex: number) => {
+    triggerHaptic('light');
+    const tableBlock = currentNote.blocks[tableIndex];
+    if (tableBlock.type !== 'table') return;
+    updateBlock(tableIndex, { ...tableBlock, is_compact: !tableBlock.is_compact }, true);
+  };
+
   const setCellAlignment = (blockIndex: number, rowIndex: number, colIndex: number, align: 'left' | 'center' | 'right') => {
     triggerHaptic('light');
     const tableBlock = currentNote.blocks[blockIndex];
@@ -1195,6 +1202,7 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
           type: 'table',
           is_bordered: b.is_bordered,
           is_striped: b.is_striped,
+          is_compact: b.is_compact,
           cells: b.cells,
         });
       } else if (b.type === 'code') {
@@ -1924,43 +1932,49 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                       }`}
                     >
                       <div
-                        className={`flex items-center justify-between px-2.5 bg-cream-surface transition-all duration-150 ease-out overflow-x-auto no-scrollbar gap-2 ${
+                        className={`flex items-center justify-between px-2.5 py-1.5 bg-cream-surface overflow-x-auto no-scrollbar gap-2 ${
                           block.is_bordered ? 'border-b border-cream-divider' : ''
-                        } ${
-                          focusedBlockIndex === index
-                            ? 'max-h-12 py-1.5 opacity-100'
-                            : 'max-h-0 py-0 opacity-0 pointer-events-none'
                         }`}
                       >
                         <div className="flex items-center gap-1">
-                          {activeTableCell && activeTableCell.blockIndex === index && (
-                            <div className="flex items-center bg-[#FAF8F5] border border-cream-divider rounded-lg p-0.5">
-                              <button
-                                onMouseDown={(e) => e.preventDefault()}
-                                onClick={() => setCellAlignment(index, activeTableCell.rowIndex, activeTableCell.colIndex, 'left')}
-                                className="w-6 h-6 flex items-center justify-center rounded text-warm-muted hover:text-warm-text active:scale-90 transition-transform"
-                              >
-                                <span className="material-symbols-outlined text-[14px]">format_align_left</span>
-                              </button>
-                              <button
-                                onMouseDown={(e) => e.preventDefault()}
-                                onClick={() => setCellAlignment(index, activeTableCell.rowIndex, activeTableCell.colIndex, 'center')}
-                                className="w-6 h-6 flex items-center justify-center rounded text-warm-muted hover:text-warm-text active:scale-90 transition-transform"
-                              >
-                                <span className="material-symbols-outlined text-[14px]">format_align_center</span>
-                              </button>
-                              <button
-                                onMouseDown={(e) => e.preventDefault()}
-                                onClick={() => setCellAlignment(index, activeTableCell.rowIndex, activeTableCell.colIndex, 'right')}
-                                className="w-6 h-6 flex items-center justify-center rounded text-warm-muted hover:text-warm-text active:scale-90 transition-transform"
-                              >
-                                <span className="material-symbols-outlined text-[14px]">format_align_right</span>
-                              </button>
-                            </div>
-                          )}
-
+                          <div
+                            className={`flex items-center bg-[#FAF8F5] border border-cream-divider rounded-lg p-0.5 transition-all duration-200 ease-out origin-left ${
+                              activeTableCell && activeTableCell.blockIndex === index
+                                ? 'opacity-100 scale-100 max-w-[96px] mr-1 pointer-events-auto'
+                                : 'opacity-0 scale-90 max-w-0 mr-0 pointer-events-none p-0 border-transparent overflow-hidden'
+                            }`}
+                          >
+                            <button
+                              type="button"
+                              tabIndex={activeTableCell && activeTableCell.blockIndex === index ? 0 : -1}
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => activeTableCell && setCellAlignment(index, activeTableCell.rowIndex, activeTableCell.colIndex, 'left')}
+                              className="w-6 h-6 flex items-center justify-center rounded text-warm-muted hover:text-warm-text active:scale-90 transition-transform"
+                            >
+                              <span className="material-symbols-outlined text-[14px]">format_align_left</span>
+                            </button>
+                            <button
+                              type="button"
+                              tabIndex={activeTableCell && activeTableCell.blockIndex === index ? 0 : -1}
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => activeTableCell && setCellAlignment(index, activeTableCell.rowIndex, activeTableCell.colIndex, 'center')}
+                              className="w-6 h-6 flex items-center justify-center rounded text-warm-muted hover:text-warm-text active:scale-90 transition-transform"
+                            >
+                              <span className="material-symbols-outlined text-[14px]">format_align_center</span>
+                            </button>
+                            <button
+                              type="button"
+                              tabIndex={activeTableCell && activeTableCell.blockIndex === index ? 0 : -1}
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => activeTableCell && setCellAlignment(index, activeTableCell.rowIndex, activeTableCell.colIndex, 'right')}
+                              className="w-6 h-6 flex items-center justify-center rounded text-warm-muted hover:text-warm-text active:scale-90 transition-transform"
+                            >
+                              <span className="material-symbols-outlined text-[14px]">format_align_right</span>
+                            </button>
+                          </div>
                           <div className="flex items-center gap-0.5">
                             <button
+                              type="button"
                               onMouseDown={(e) => e.preventDefault()}
                               onClick={() => toggleTableBorder(index)}
                               className={`p-1 rounded-lg transition-colors active:scale-90 ${
@@ -1970,6 +1984,7 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                               <span className="material-symbols-outlined text-[15px]">border_all</span>
                             </button>
                             <button
+                              type="button"
                               onMouseDown={(e) => e.preventDefault()}
                               onClick={() => toggleTableStriped(index)}
                               className={`p-1 rounded-lg transition-colors active:scale-90 ${
@@ -1978,28 +1993,41 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                             >
                               <span className="material-symbols-outlined text-[15px]">table_rows</span>
                             </button>
+                            <button
+                              type="button"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => toggleTableCompact(index)}
+                              className={`p-1 rounded-lg transition-colors active:scale-90 ${
+                                block.is_compact ? 'text-warm-accent bg-warm-accent-light' : 'text-warm-muted hover:text-warm-text'
+                              }`}
+                            >
+                              <span className="material-symbols-outlined text-[15px] leading-none">view_compact</span>
+                            </button>
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center bg-[#FAF8F5] border border-cream-divider rounded-lg p-0.5 shrink-0">
+                          <span className="text-[10px] font-semibold text-warm-accent pl-1 pr-0.5 uppercase tracking-wider flex items-center gap-0.5">
+                            <span className="material-symbols-outlined text-[13px] leading-none rotate-90">table_rows</span>
+                          </span>
                           <button
+                            type="button"
+                            title={t('add_col')}
                             onMouseDown={(e) => e.preventDefault()}
-                            onClick={() => removeTableRow(index, activeTableCell?.rowIndex)}
-                            disabled={block.cells.length <= 1}
-                            className="px-2 py-1 rounded-md text-[11px] font-medium text-warm-muted hover:text-red-600 disabled:opacity-30 flex items-center gap-0.5 active:scale-90 transition-transform"
+                            onClick={() => addTableColumn(index)}
+                            className="w-5 h-5 flex items-center justify-center rounded text-warm-muted hover:text-warm-accent active:scale-90 transition-transform"
                           >
-                            <span className="material-symbols-outlined text-[13px]">delete</span>
-                            <span>{t('del_row').replace(/^[+\-–]\s*/, '')}</span>
+                            <span className="material-symbols-outlined text-[13px] leading-none">add</span>
                           </button>
-                          <span className="h-3 w-[1px] bg-cream-divider mx-0.5" />
                           <button
+                            type="button"
+                            title={t('del_col')}
                             onMouseDown={(e) => e.preventDefault()}
                             onClick={() => removeTableColumn(index, activeTableCell?.colIndex)}
                             disabled={(block.cells[0]?.length || 0) <= 1}
-                            className="px-2 py-1 rounded-md text-[11px] font-medium text-warm-muted hover:text-red-600 disabled:opacity-30 flex items-center gap-0.5 active:scale-90 transition-transform"
+                            className="w-5 h-5 flex items-center justify-center rounded text-warm-muted hover:text-red-600 disabled:opacity-20 active:scale-90 transition-transform"
                           >
-                            <span className="material-symbols-outlined text-[13px]">delete</span>
-                            <span>{t('del_col').replace(/^[+\-–]\s*/, '')}</span>
+                            <span className="material-symbols-outlined text-[13px] leading-none">remove</span>
                           </button>
                         </div>
                       </div>
@@ -2016,9 +2044,7 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                                 key={rIdx}
                                 className={`${
                                   rIdx === 0
-                                    ? `bg-cream-surface/80 font-semibold text-warm-text ${
-                                        block.is_bordered ? 'border-b border-cream-divider' : ''
-                                      }`
+                                    ? `bg-cream-surface/80 font-semibold text-warm-text`
                                     : block.is_striped && rIdx % 2 === 1
                                     ? 'bg-cream-surface/35'
                                     : 'bg-transparent'
@@ -2027,20 +2053,19 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                                 {row.map((col, cIdx) => (
                                   <td
                                     key={cIdx}
-                                    className={`p-0 relative min-w-0 ${
+                                    style={{ outline: 'none' }}
+                                    className={`p-0 relative min-w-0 outline-none ${
                                       (block.cells[0]?.length || 0) > 2 ? 'min-w-[100px]' : ''
                                     } ${
                                       block.is_bordered
-                                        ? `border-cream-divider ${rIdx < block.cells.length - 1 ? 'border-b' : ''} ${
-                                            cIdx < row.length - 1 ? 'border-r' : ''
-                                          }`
-                                        : 'border-none'
+                                        ? 'border border-cream-divider'
+                                        : 'border border-transparent'
                                     }`}
                                   >
                                     <input
                                       type="text"
                                       value={col.text}
-                                      placeholder={rIdx === 0 ? `${t('table_col')} ${cIdx + 1}` : `${t('table_cell')} ${rIdx + 1}`}
+                                      placeholder={rIdx === 0 ? `${t('table_col')} ${cIdx + 1}` : `${t('table_row')} ${rIdx + 1}`}
                                       onFocus={() => {
                                         setFocusedBlockIndex(index);
                                         setActiveTableCell({ blockIndex: index, rowIndex: rIdx, colIndex: cIdx });
@@ -2051,36 +2076,15 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                                         );
                                         updateBlock(index, { ...block, cells: nextCells }, false);
                                       }}
-                                      className={`w-full min-w-0 bg-transparent border-none focus:outline-none text-warm-text px-2.5 py-1.5 font-medium ${
+                                      style={{ outline: 'none', boxShadow: 'none' }}
+                                      className={`w-full min-w-0 bg-transparent border-none outline-none focus:outline-none focus:ring-0 text-warm-text font-medium transition-all ${
+                                        block.is_compact ? 'px-1.5 py-0.5 text-[11px]' : 'px-2.5 py-1.5 text-xs'
+                                      } ${
                                         col.align === 'center' ? 'text-center' : col.align === 'right' ? 'text-right' : 'text-left'
                                       }`}
                                     />
                                   </td>
                                 ))}
-                                {rIdx === 0 ? (
-                                  <th
-                                    style={{ width: '32px', minWidth: '32px', maxWidth: '32px' }}
-                                    className={`w-8 min-w-[32px] max-w-[32px] p-0 text-center align-middle ${
-                                      block.is_bordered ? 'border-b border-cream-divider bg-cream-surface/60' : 'bg-cream-surface/30'
-                                    }`}
-                                  >
-                                    <button
-                                      onMouseDown={(e) => e.preventDefault()}
-                                      onClick={() => addTableColumn(index)}
-                                      className="w-full h-full min-h-[30px] flex items-center justify-center text-warm-muted hover:text-warm-accent active:scale-90 transition-transform"
-                                      title={t('add_col').replace(/^[+\-–]\s*/, '')}
-                                    >
-                                      <span className="material-symbols-outlined text-[15px]">add</span>
-                                    </button>
-                                  </th>
-                                ) : (
-                                  <td
-                                    style={{ width: '32px', minWidth: '32px', maxWidth: '32px' }}
-                                    className={`w-8 min-w-[32px] max-w-[32px] p-0 ${
-                                      block.is_bordered && rIdx < block.cells.length - 1 ? 'border-b border-cream-divider/30' : ''
-                                    }`}
-                                  />
-                                )}
                               </tr>
                             ))}
                           </tbody>
@@ -2088,21 +2092,34 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                       </div>
 
                       <div
-                        className={`flex items-center justify-between px-3 py-1 bg-cream-surface/30 ${
+                        className={`flex items-center px-2.5 py-1.5 bg-cream-surface/40 ${
                           block.is_bordered ? 'border-t border-cream-divider' : ''
                         }`}
                       >
-                        <button
-                          onMouseDown={(e) => e.preventDefault()}
-                          onClick={() => addTableRow(index)}
-                          className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium text-warm-muted hover:text-warm-accent active:scale-90 transition-transform"
-                        >
-                          <span className="material-symbols-outlined text-[14px]">add</span>
-                          <span>{t('add_row').replace(/^[+\-–]\s*/, '')}</span>
-                        </button>
-                        <span className="text-[10px] font-mono text-warm-subtle">
-                          {block.cells.length} × {block.cells[0]?.length || 0}
-                        </span>
+                        <div className="flex items-center bg-[#FAF8F5] border border-cream-divider rounded-lg p-0.5">
+                          <span className="text-[10px] font-semibold text-warm-accent pl-1 pr-0.5 uppercase tracking-wider flex items-center gap-0.5">
+                            <span className="material-symbols-outlined text-[13px] leading-none">table_rows</span>
+                          </span>
+                          <button
+                            type="button"
+                            title={t('add_row')}
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => addTableRow(index)}
+                            className="w-5 h-5 flex items-center justify-center rounded text-warm-muted hover:text-warm-accent active:scale-90 transition-transform"
+                          >
+                            <span className="material-symbols-outlined text-[13px] leading-none">add</span>
+                          </button>
+                          <button
+                            type="button"
+                            title={t('del_row')}
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => removeTableRow(index, activeTableCell?.rowIndex)}
+                            disabled={block.cells.length <= 1}
+                            className="w-5 h-5 flex items-center justify-center rounded text-warm-muted hover:text-red-600 disabled:opacity-20 active:scale-90 transition-transform"
+                          >
+                            <span className="material-symbols-outlined text-[13px] leading-none">remove</span>
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
