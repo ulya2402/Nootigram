@@ -13,21 +13,70 @@ interface EditorViewProps {
   onDelete: (id: string) => void;
 }
 
+const setCaretToStart = (el: HTMLElement) => {
+  el.focus();
+  const sel = window.getSelection();
+  if (!sel) return;
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  range.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(range);
+};
+
+const setCaretAtTextOffset = (root: Node, targetOffset: number) => {
+  const sel = window.getSelection();
+  if (!sel) return;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+  let currentLength = 0;
+  let node = walker.nextNode();
+  while (node) {
+    const nextLength = currentLength + (node.nodeValue?.length || 0);
+    if (targetOffset <= nextLength) {
+      const range = document.createRange();
+      range.setStart(node, Math.max(0, targetOffset - currentLength));
+      range.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(range);
+      return;
+    }
+    currentLength = nextLength;
+    node = walker.nextNode();
+  }
+  const range = document.createRange();
+  range.selectNodeContents(root);
+  range.collapse(false);
+  sel.removeAllRanges();
+  sel.addRange(range);
+};
+
+const stripEdgeBreaks = (html: string): string => {
+  let result = (html || '').trim();
+  let prev = '';
+  while (result !== prev) {
+    prev = result;
+    result = result
+      .replace(/^(?:&nbsp;|\s|<br\s*[\/]?>|<div>(?:\s|<br\s*[\/]?>|&nbsp;)*<\/div>|\u200B)+/gi, '')
+      .replace(/(?:&nbsp;|\s|<br\s*[\/]?>|<div>(?:\s|<br\s*[\/]?>|&nbsp;)*<\/div>|\u200B)+$/gi, '')
+      .trim();
+  }
+  return result;
+};
+
 const EditableBlock: React.FC<{
   html: string;
   placeholder: string;
   className?: string;
   onFocus?: () => void;
   onChange: (newHtml: string) => void;
-}> = ({ html, placeholder, className, onFocus, onChange }) => {
+  onKeyDown?: (e: React.KeyboardEvent<HTMLDivElement>) => void;
+}> = ({ html, placeholder, className, onFocus, onChange, onKeyDown }) => {
   const divRef = useRef<HTMLDivElement>(null);
-
   useEffect(() => {
     if (divRef.current && divRef.current.innerHTML !== html) {
       divRef.current.innerHTML = html || '';
     }
   }, [html]);
-
   return (
     <div
       ref={divRef}
@@ -38,6 +87,7 @@ const EditableBlock: React.FC<{
       onInput={(e) => {
         onChange(e.currentTarget.innerHTML);
       }}
+      onKeyDown={onKeyDown}
       className={className}
     />
   );
@@ -156,6 +206,7 @@ const totalImageCount = currentNote.blocks.reduce((count, b) => {
   const blockElementRefs = useRef<Record<string, HTMLElement | null>>({});
   const historyTimerRef = useRef<number | null>(null);
   const flipPositionsRef = useRef<Map<string, number>>(new Map());
+  const lastEnterRef = useRef<{ index: number; time: number } | null>(null);
 
   useLayoutEffect(() => {
     if (flipPositionsRef.current.size === 0) return;
@@ -600,6 +651,171 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
       setHistoryIndex(targetIndex);
       setCurrentNote(target);
       onSave(target);
+    }
+  };
+
+  const handleParagraphSplit = (index: number, leftHtml: string, rightHtml: string) => {
+    triggerHaptic('light');
+    const currentBlock = currentNote.blocks[index];
+    if (!currentBlock || currentBlock.type !== 'paragraph') return;
+    const newBlockId = `p-${Date.now()}`;
+    const updatedCurrent: ContentBlock = {
+      id: currentBlock.id,
+      type: 'paragraph',
+      text: leftHtml,
+    };
+    const newBlock: ContentBlock = {
+      id: newBlockId,
+      type: 'paragraph',
+      text: rightHtml,
+    };
+    const nextBlocks = [
+      ...currentNote.blocks.slice(0, index),
+      updatedCurrent,
+      newBlock,
+      ...currentNote.blocks.slice(index + 1),
+    ];
+    persistChange({ ...currentNote, blocks: nextBlocks }, true);
+    setFocusedBlockIndex(index + 1);
+    setTimeout(() => {
+      const el = blockElementRefs.current[newBlockId];
+      const editable = el?.querySelector<HTMLDivElement>('[contenteditable="true"]');
+      if (editable) {
+        setCaretToStart(editable);
+      }
+    }, 30);
+  };
+
+  const handleParagraphMerge = (index: number, currentHtml: string) => {
+    if (index <= 0) return;
+    const prevBlock = currentNote.blocks[index - 1];
+    if (!prevBlock) return;
+
+    if (prevBlock.type === 'paragraph') {
+      triggerHaptic('light');
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = prevBlock.text;
+      const junctionOffset = tempDiv.textContent?.length || 0;
+
+      const cleanCurrent = stripEdgeBreaks(currentHtml);
+      const mergedText = prevBlock.text + cleanCurrent;
+
+      const updatedPrev: ContentBlock = {
+        id: prevBlock.id,
+        type: 'paragraph',
+        text: mergedText,
+      };
+
+      const nextBlocks = [
+        ...currentNote.blocks.slice(0, index - 1),
+        updatedPrev,
+        ...currentNote.blocks.slice(index + 1),
+      ];
+
+      persistChange({ ...currentNote, blocks: nextBlocks }, true);
+      setFocusedBlockIndex(index - 1);
+
+      setTimeout(() => {
+        const prevEl = blockElementRefs.current[prevBlock.id];
+        const prevEditable = prevEl?.querySelector<HTMLDivElement>('[contenteditable="true"]');
+        if (prevEditable) {
+          prevEditable.focus();
+          setCaretAtTextOffset(prevEditable, junctionOffset);
+        }
+      }, 40);
+    } else if (!currentHtml || currentHtml.replace(/<[^>]*>/g, '').trim() === '') {
+      triggerHaptic('light');
+      const nextBlocks = currentNote.blocks.filter((_, i) => i !== index);
+      persistChange({ ...currentNote, blocks: nextBlocks }, true);
+      setFocusedBlockIndex(index - 1);
+
+      setTimeout(() => {
+        const prevEl = blockElementRefs.current[prevBlock.id];
+        const targetFocus = prevEl?.querySelector<HTMLElement>('[contenteditable="true"], input, textarea');
+        if (targetFocus) {
+          targetFocus.focus();
+        }
+      }, 40);
+    }
+  };
+
+  const handleParagraphKeyDown = (e: React.KeyboardEvent<HTMLDivElement>, index: number) => {
+    if (e.key !== 'Enter') {
+      lastEnterRef.current = null;
+    }
+
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0) return;
+      const range = sel.getRangeAt(0);
+      const el = e.currentTarget;
+
+      const preRange = range.cloneRange();
+      preRange.selectNodeContents(el);
+      preRange.setEnd(range.startContainer, range.startOffset);
+      const tempLeft = document.createElement('div');
+      tempLeft.appendChild(preRange.cloneContents());
+
+      const postRange = range.cloneRange();
+      postRange.selectNodeContents(el);
+      postRange.setStart(range.endContainer, range.endOffset);
+      const tempRight = document.createElement('div');
+      tempRight.appendChild(postRange.cloneContents());
+
+      const leftHtml = tempLeft.innerHTML;
+      const rightHtml = tempRight.innerHTML;
+      const isConsecutive = lastEnterRef.current?.index === index;
+      const leftEndsWithBr = /(?:<br\s*[\/]?>|<div>(?:\s|<br\s*[\/]?>)*<\/div>|\s)+$/i.test(leftHtml);
+
+      if (isConsecutive || leftEndsWithBr) {
+        lastEnterRef.current = null;
+        const cleanLeft = stripEdgeBreaks(leftHtml);
+        const cleanRight = stripEdgeBreaks(rightHtml);
+        handleParagraphSplit(index, cleanLeft, cleanRight);
+        return;
+      }
+
+      lastEnterRef.current = { index, time: Date.now() };
+      document.execCommand('insertLineBreak');
+      updateBlock(
+        index,
+        {
+          id: currentNote.blocks[index].id,
+          type: 'paragraph',
+          text: el.innerHTML,
+        },
+        false
+      );
+      return;
+    }
+
+    if (e.key === 'Backspace') {
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return;
+      const range = sel.getRangeAt(0);
+      const el = e.currentTarget;
+
+      const cleanText = (el.textContent || '').replace(/[\u200B\uFEFF\s]/g, '');
+      const isBlockEmpty = cleanText.length === 0;
+
+      let isAtCaretStart = false;
+      if (!isBlockEmpty) {
+        try {
+          const preRange = document.createRange();
+          preRange.selectNodeContents(el);
+          preRange.setEnd(range.startContainer, range.startOffset);
+          const textBefore = (preRange.toString() || '').replace(/[\u200B\uFEFF\r\n]/g, '');
+          isAtCaretStart = textBefore.length === 0;
+        } catch {
+          isAtCaretStart = range.startOffset === 0;
+        }
+      }
+
+      if (isBlockEmpty || isAtCaretStart) {
+        e.preventDefault();
+        handleParagraphMerge(index, isBlockEmpty ? '' : el.innerHTML);
+      }
     }
   };
 
@@ -1297,6 +1513,7 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                     placeholder={t('paragraph_placeholder')}
                     onFocus={() => setFocusedBlockIndex(index)}
                     onChange={(newHtml) => updateBlock(index, { ...block, text: newHtml })}
+                    onKeyDown={(e) => handleParagraphKeyDown(e, index)}
                     className="w-full text-[15px] leading-relaxed text-warm-text bg-transparent border-none focus:outline-none min-h-[24px]"
                   />
                 )}
