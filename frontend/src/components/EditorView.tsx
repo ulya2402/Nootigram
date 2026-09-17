@@ -110,8 +110,17 @@ export const EditorView: React.FC<EditorViewProps> = ({
   const [focusedBlockIndex, setFocusedBlockIndex] = useState<number | null>(null);
   const [activeTableCell, setActiveTableCell] = useState<{ blockIndex: number; rowIndex: number; colIndex: number } | null>(null);
   const [activeToolbarTab, setActiveToolbarTab] = useState<'text' | 'lists' | 'quotes' | 'media' | 'table' | 'objects'>('text');
-const [activeSlideIndices, setActiveSlideIndices] = useState<Record<string, number>>({});
-const [isUploadingGlobal, setIsUploadingGlobal] = useState<boolean>(false);
+  const [activeSlideIndices, setActiveSlideIndices] = useState<Record<string, number>>({});
+  const [openDetailsMap, setOpenDetailsMap] = useState<Record<string, boolean>>({});
+  const [isUploadingGlobal, setIsUploadingGlobal] = useState<boolean>(false);
+
+  const toggleDetails = (blockId: string) => {
+    triggerHaptic('light');
+    setOpenDetailsMap((prev) => ({
+      ...prev,
+      [blockId]: prev[blockId] === false ? true : false,
+    }));
+  };
 const [uploadingBlockId, setUploadingBlockId] = useState<string | null>(null);
 const fileInputRef = useRef<HTMLInputElement>(null);
 const targetMediaBlockIndexRef = useRef<number | null>(null);
@@ -1312,7 +1321,7 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                 )}
 
                 {block.type === 'quote' && (
-                  <div className="border-l-2 border-warm-accent pl-3 py-0.5 my-1 flex flex-col gap-1">
+                  <div className="w-full my-1.5 rounded-r-xl border-l-[3.5px] border-warm-accent bg-cream-surface/75 px-3 py-2.5 flex flex-col gap-1.5 transition-all">
                     <textarea
                       rows={1}
                       value={block.text}
@@ -1323,7 +1332,7 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                       onFocus={() => setFocusedBlockIndex(index)}
                       onInput={(e) => autoResize(e.currentTarget)}
                       onChange={(e) => updateBlock(index, { ...block, text: e.target.value })}
-                      className="w-full text-[15px] italic text-[#4A3828] bg-transparent border-none focus:outline-none resize-none overflow-hidden"
+                      className="w-full text-[14.5px] text-warm-text leading-relaxed bg-transparent border-none focus:outline-none resize-none overflow-hidden"
                     />
                     <input
                       type="text"
@@ -1331,13 +1340,18 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                       placeholder={t('quote_credit_placeholder')}
                       onFocus={() => setFocusedBlockIndex(index)}
                       onChange={(e) => updateBlock(index, { ...block, credit: e.target.value })}
-                      className="w-full text-xs font-medium text-warm-accent bg-transparent border-none focus:outline-none"
+                      className="w-full text-[11px] font-medium text-warm-accent bg-transparent border-none focus:outline-none tracking-wide"
                     />
                   </div>
                 )}
-
                 {block.type === 'expandable_quote' && (
-                  <div className="border-l-2 border-dashed border-warm-accent pl-3 py-0.5 my-1 flex flex-col gap-1 bg-cream-surface/40 rounded-r">
+                  <div className="w-full my-1.5 rounded-r-xl border-l-[3.5px] border-warm-accent bg-cream-surface/75 px-3 py-2.5 flex flex-col gap-1.5 transition-all">
+                    <div className="flex items-center justify-between pb-1 border-b border-cream-divider/50">
+                      <span className="text-[10px] font-semibold text-warm-accent uppercase tracking-wider flex items-center gap-1">
+                        <span className="material-symbols-outlined text-[13px]">unfold_more</span>
+                        <span>{t('tool_quote_expand')}</span>
+                      </span>
+                    </div>
                     <textarea
                       rows={1}
                       value={block.text}
@@ -1348,7 +1362,7 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                       onFocus={() => setFocusedBlockIndex(index)}
                       onInput={(e) => autoResize(e.currentTarget)}
                       onChange={(e) => updateBlock(index, { ...block, text: e.target.value })}
-                      className="w-full text-[15px] italic text-warm-text bg-transparent border-none focus:outline-none resize-none overflow-hidden"
+                      className="w-full text-[14.5px] text-warm-text leading-relaxed bg-transparent border-none focus:outline-none resize-none overflow-hidden"
                     />
                     <input
                       type="text"
@@ -1356,7 +1370,7 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                       placeholder={t('quote_credit_placeholder')}
                       onFocus={() => setFocusedBlockIndex(index)}
                       onChange={(e) => updateBlock(index, { ...block, credit: e.target.value })}
-                      className="w-full text-xs font-medium text-warm-accent bg-transparent border-none focus:outline-none"
+                      className="w-full text-[11px] font-medium text-warm-accent bg-transparent border-none focus:outline-none tracking-wide"
                     />
                   </div>
                 )}
@@ -1647,7 +1661,7 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                         placeholder={t('image_caption_placeholder')}
                         onFocus={() => setFocusedBlockIndex(index)}
                         onChange={(e) => updateBlock(index, { ...block, caption: e.target.value })}
-                        className="w-full text-xs italic text-warm-muted bg-transparent border-none focus:outline-none placeholder:text-warm-subtle"
+                        className="w-full text-xs font-normal text-warm-text bg-transparent border-none focus:outline-none placeholder:text-warm-subtle"
                       />
                     </div>
                   </div>
@@ -1877,32 +1891,87 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                 )}
 
                 {block.type === 'details' && (
-                  <div className="border-l border-cream-divider pl-3 my-1 flex flex-col gap-1">
-                    <input
-                      type="text"
-                      value={block.summary}
-                      placeholder={t('details_summary_placeholder')}
-                      onFocus={() => setFocusedBlockIndex(index)}
-                      onChange={(e) => updateBlock(index, { ...block, summary: e.target.value })}
-                      className="text-xs font-semibold text-warm-accent bg-transparent border-none focus:outline-none"
-                    />
-                    <textarea
-                      rows={1}
-                      value={block.text}
-                      placeholder={t('details_content_placeholder')}
-                      ref={(el) => {
-                        if (el) autoResize(el);
-                      }}
-                      onFocus={() => setFocusedBlockIndex(index)}
-                      onInput={(e) => autoResize(e.currentTarget)}
-                      onChange={(e) => updateBlock(index, { ...block, text: e.target.value })}
-                      className="text-xs text-warm-text bg-transparent border-none focus:outline-none resize-none overflow-hidden"
-                    />
+                  <div className="w-full my-2 rounded-xl border border-cream-divider/80 bg-cream-surface/40 overflow-hidden transition-all">
+                    <div
+                      onClick={() => toggleDetails(block.id)}
+                      className="flex items-center justify-between px-3 py-2 bg-cream-surface/60 cursor-pointer select-none"
+                    >
+                      <input
+                        type="text"
+                        value={block.summary}
+                        placeholder={t('details_summary_placeholder')}
+                        onClick={(e) => e.stopPropagation()}
+                        onFocus={() => setFocusedBlockIndex(index)}
+                        onChange={(e) => updateBlock(index, { ...block, summary: e.target.value })}
+                        className="flex-1 text-xs font-semibold text-warm-text bg-transparent border-none focus:outline-none pr-2"
+                      />
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleDetails(block.id);
+                        }}
+                        className="w-5 h-5 flex items-center justify-center text-warm-muted transition-transform duration-200"
+                        style={{
+                          transform: openDetailsMap[block.id] !== false ? 'rotate(180deg)' : 'rotate(0deg)',
+                        }}
+                      >
+                        <span className="material-symbols-outlined text-[16px]">expand_more</span>
+                      </button>
+                    </div>
+                    <div
+                      className={`grid transition-[grid-template-rows,opacity] duration-200 ease-out ${
+                        openDetailsMap[block.id] !== false
+                          ? 'grid-rows-[1fr] opacity-100'
+                          : 'grid-rows-[0fr] opacity-0 pointer-events-none'
+                      }`}
+                    >
+                      <div className="overflow-hidden">
+                        <div className="p-3 border-t border-cream-divider/60">
+                          <textarea
+                            rows={1}
+                            value={block.text}
+                            placeholder={t('details_content_placeholder')}
+                            ref={(el) => {
+                              if (el) autoResize(el);
+                            }}
+                            onFocus={() => setFocusedBlockIndex(index)}
+                            onInput={(e) => autoResize(e.currentTarget)}
+                            onChange={(e) => updateBlock(index, { ...block, text: e.target.value })}
+                            className="w-full text-xs leading-relaxed text-warm-text bg-transparent border-none focus:outline-none resize-none overflow-hidden"
+                          />
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 )}
 
-                {block.type === 'divider' && <div className="w-full h-px bg-cream-divider my-2" />}
-              </div>
+                {block.type === 'divider' && (
+                  <div
+                    tabIndex={0}
+                    onClick={() => {
+                      triggerHaptic('light');
+                      setFocusedBlockIndex(index);
+                    }}
+                    onFocus={() => setFocusedBlockIndex(index)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Backspace' || e.key === 'Delete') {
+                        e.preventDefault();
+                        removeBlock(index);
+                      }
+                    }}
+                    className="w-full py-3 cursor-pointer group/divider flex items-center focus:outline-none"
+                  >
+                    <div
+                      className={`w-full h-[1.5px] transition-all duration-150 ${
+                        focusedBlockIndex === index
+                          ? 'bg-warm-accent shadow-xs'
+                          : 'bg-cream-divider group-hover/divider:bg-warm-subtle'
+                      }`}
+                    />
+                  </div>
+                )}
+                  </div>
 
               {focusedBlockIndex === index && (
                 <div className="absolute right-0 -top-3 z-10 flex items-center gap-1 bg-[#FAF8F5] border border-cream-divider/80 px-1.5 py-0.5 rounded-full shadow-sm animate-page-fade">
