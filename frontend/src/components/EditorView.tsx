@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { NoteItem, ContentBlock, TaskItem, TableCell, TopicItem, MediaImageItem } from '../types';
 import { t } from '../services/i18n';
 import { exportNoteToTelegram } from '../services/api';
-import { uploadToImgbb } from '../services/imgbb';
+import { uploadToImgbb, deleteFromImgbb } from '../services/imgbb';
 
 interface EditorViewProps {
   note: NoteItem;
@@ -207,6 +207,7 @@ const totalImageCount = currentNote.blocks.reduce((count, b) => {
   const historyTimerRef = useRef<number | null>(null);
   const flipPositionsRef = useRef<Map<string, number>>(new Map());
   const lastEnterRef = useRef<{ index: number; time: number } | null>(null);
+  const pendingDeletionsRef = useRef<Set<string>>(new Set());
 
   useLayoutEffect(() => {
     if (flipPositionsRef.current.size === 0) return;
@@ -362,26 +363,6 @@ const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     setIsUploadingGlobal(false);
     setUploadingBlockId(null);
     targetMediaBlockIndexRef.current = null;
-  }
-};
-
-const removeImageFromBlock = (blockIndex: number, imageIndex: number) => {
-  triggerHaptic('light');
-  const block = currentNote.blocks[blockIndex];
-  if (block.type !== 'media') return;
-  const nextImages = block.images.filter((_, i) => i !== imageIndex);
-  if (nextImages.length === 0) {
-    removeBlock(blockIndex);
-  } else {
-    updateBlock(
-      blockIndex,
-      {
-        ...block,
-        layout: 'single',
-        images: nextImages,
-      },
-      true
-    );
   }
 };
 
@@ -580,13 +561,21 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
     updateActiveFormats();
   };
 
+  const handleSafeBack = useCallback(() => {
+    pendingDeletionsRef.current.forEach((url) => {
+      deleteFromImgbb(url);
+    });
+    pendingDeletionsRef.current.clear();
+    onBack();
+  }, [onBack]);
+
   useEffect(() => {
     const tg = window.Telegram?.WebApp;
     if (tg?.BackButton) {
       tg.BackButton.show();
       const handleNativeBack = () => {
         triggerHaptic();
-        onBack();
+        handleSafeBack();
       };
       tg.BackButton.onClick(handleNativeBack);
       return () => {
@@ -594,7 +583,7 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
         tg.BackButton.hide();
       };
     }
-  }, [onBack]);
+  }, [handleSafeBack]);
 
   const autoResize = (el: HTMLTextAreaElement) => {
     el.style.height = 'auto';
@@ -640,6 +629,55 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
       setHistoryIndex(targetIndex);
       setCurrentNote(target);
       onSave(target);
+
+      target.blocks.forEach((b) => {
+        if (b.type === 'media' && Array.isArray(b.images)) {
+          b.images.forEach((img) => {
+            if (img.delete_url && pendingDeletionsRef.current.has(img.delete_url)) {
+              pendingDeletionsRef.current.delete(img.delete_url);
+            }
+          });
+        }
+      });
+    }
+  };
+
+  const removeBlock = (index: number) => {
+    triggerHaptic('medium');
+    const block = currentNote.blocks[index];
+    if (block && block.type === 'media' && Array.isArray(block.images)) {
+      block.images.forEach((img) => {
+        if (img.delete_url) {
+          pendingDeletionsRef.current.add(img.delete_url);
+        }
+      });
+    }
+    const filtered = currentNote.blocks.filter((_, i) => i !== index);
+    persistChange({ ...currentNote, blocks: filtered }, true);
+    setFocusedBlockIndex(null);
+  };
+
+  const removeImageFromBlock = (blockIndex: number, imageIndex: number) => {
+    triggerHaptic('light');
+    const block = currentNote.blocks[blockIndex];
+    if (block.type !== 'media') return;
+    const targetImg = block.images[imageIndex];
+    if (targetImg?.delete_url) {
+      pendingDeletionsRef.current.add(targetImg.delete_url);
+    }
+    const nextImages = block.images.filter((_, i) => i !== imageIndex);
+    if (nextImages.length === 0) {
+      removeBlock(blockIndex);
+    } else {
+      updateBlock(
+        blockIndex,
+        {
+          ...block,
+          layout: 'single',
+          images: nextImages,
+        },
+        true
+      );
     }
   };
 
@@ -829,12 +867,7 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
     persistChange({ ...currentNote, blocks: nextBlocks }, immediateHistory);
   };
 
-  const removeBlock = (index: number) => {
-    triggerHaptic('medium');
-    const filtered = currentNote.blocks.filter((_, i) => i !== index);
-    persistChange({ ...currentNote, blocks: filtered }, true);
-    setFocusedBlockIndex(null);
-  };
+
 
   const moveBlock = (index: number, direction: 'up' | 'down') => {
     const targetIndex = direction === 'up' ? index - 1 : index + 1;

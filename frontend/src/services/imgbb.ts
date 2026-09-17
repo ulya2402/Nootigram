@@ -5,9 +5,55 @@ function getAuthHeader(): string {
   return `TelegramInitData ${initData}`;
 }
 
+export async function compressImage(file: File, quality = 0.75, maxWidth = 1440): Promise<File> {
+  if (!file.type.startsWith('image/')) return file;
+  return new Promise((resolve) => {
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      let width = img.width;
+      let height = img.height;
+      if (width > maxWidth) {
+        height = Math.round((height * maxWidth) / width);
+        width = maxWidth;
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(file);
+        return;
+      }
+      ctx.drawImage(img, 0, 0, width, height);
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) {
+            resolve(file);
+            return;
+          }
+          const compressed = new File([blob], file.name.replace(/\.[^/.]+$/, '.jpg'), {
+            type: 'image/jpeg',
+          });
+          resolve(compressed);
+        },
+        'image/jpeg',
+        quality
+      );
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(file);
+    };
+    img.src = objectUrl;
+  });
+}
+
 export async function uploadToImgbb(file: File): Promise<{ url: string; delete_url?: string }> {
+  const compressed = await compressImage(file, 0.75);
   const formData = new FormData();
-  formData.append('image', file);
+  formData.append('image', compressed);
 
   const response = await fetch(`${API_BASE}/api/media/upload`, {
     method: 'POST',
@@ -28,4 +74,23 @@ export async function uploadToImgbb(file: File): Promise<{ url: string; delete_u
     url: result.url,
     delete_url: result.delete_url,
   };
+}
+
+export async function deleteFromImgbb(deleteUrl?: string): Promise<boolean> {
+  if (!deleteUrl) return false;
+  try {
+    const response = await fetch(`${API_BASE}/api/media/delete`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: getAuthHeader(),
+      },
+      body: JSON.stringify({ delete_url: deleteUrl }),
+      keepalive: true,
+    });
+    return response.ok;
+  } catch (error) {
+    console.error(`API_CLIENT_ERROR deleteFromImgbb: ${(error as Error).message}`);
+    return false;
+  }
 }

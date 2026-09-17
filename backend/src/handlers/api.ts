@@ -277,5 +277,36 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
     }
   }
 
+  if (request.method === 'POST' && path === '/api/media/delete') {
+    try {
+      const body = (await request.json()) as { delete_url?: string };
+      if (!body.delete_url || !body.delete_url.startsWith('https://ibb.co/')) {
+        return new Response(JSON.stringify({ error: 'INVALID_URL' }), { status: 400 });
+      }
+      const pageRes = await fetch(body.delete_url);
+      const html = await pageRes.text();
+      const tokenMatch = html.match(/auth_token\s*=\s*["']([a-f0-9]+)["']/i) || html.match(/name="auth_token"\s+value="([^"]+)"/i);
+      const authToken = tokenMatch ? tokenMatch[1] : '';
+      const formBody = new URLSearchParams();
+      formBody.append('action', 'delete');
+      if (authToken) {
+        formBody.append('auth_token', authToken);
+      }
+      const delRes = await fetch(body.delete_url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: formBody.toString(),
+      });
+      return new Response(JSON.stringify({ success: delRes.ok }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    } catch (error) {
+      console.error(`API_MEDIA_DELETE_ERROR: ${(error as Error).message}`);
+      return new Response(JSON.stringify({ error: 'DELETE_FAILED' }), { status: 500 });
+    }
+  }
+
   return new Response(JSON.stringify({ error: 'NOT_FOUND' }), { status: 404 });
 }

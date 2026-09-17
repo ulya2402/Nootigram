@@ -6,6 +6,7 @@ import { EditorView } from './components/EditorView';
 import { NoteItem, TopicItem } from './types';
 import { fetchBootstrap, syncNotesBatch, deleteNoteApi, deleteNotesBatchApi, createTopicApi, deleteTopicApi } from './services/api';
 import { setLanguage, t, subscribeLanguage } from './services/i18n';
+import { deleteFromImgbb } from './services/imgbb';
 
 let isTelegramBound = false;
 
@@ -206,6 +207,18 @@ export const App: React.FC = () => {
   };
 
   const handleDeleteNote = (id: string) => {
+    const target = notes.find((n) => n.id === id);
+    if (target) {
+      target.blocks.forEach((b) => {
+        if (b.type === 'media' && 'images' in b && Array.isArray(b.images)) {
+          b.images.forEach((img: any) => {
+            if (img?.delete_url) {
+              deleteFromImgbb(img.delete_url);
+            }
+          });
+        }
+      });
+    }
     pendingNotesRef.current.delete(id);
     const nextNotes = notes.filter((n) => n.id !== id);
     setNotes(nextNotes);
@@ -218,6 +231,18 @@ export const App: React.FC = () => {
   };
 
   const handleBatchDeleteNotes = (ids: string[]) => {
+    const targets = notes.filter((n) => ids.includes(n.id));
+    targets.forEach((target) => {
+      target.blocks.forEach((b) => {
+        if (b.type === 'media' && 'images' in b && Array.isArray(b.images)) {
+          b.images.forEach((img: any) => {
+            if (img?.delete_url) {
+              deleteFromImgbb(img.delete_url);
+            }
+          });
+        }
+      });
+    });
     ids.forEach((id) => pendingNotesRef.current.delete(id));
     const nextNotes = notes.filter((n) => !ids.includes(n.id));
     setNotes(nextNotes);
