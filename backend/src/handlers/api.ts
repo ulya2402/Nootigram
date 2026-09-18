@@ -24,7 +24,7 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
       const results = await env.DB.batch([
         env.DB.prepare('SELECT language_code FROM users WHERE telegram_id = ?').bind(userId),
         env.DB.prepare('SELECT id, name, is_default FROM topics WHERE telegram_id = ? ORDER BY created_at ASC').bind(userId),
-        env.DB.prepare("SELECT id, category, title, content_raw, blocks_json, is_pinned, strftime('%Y-%m-%dT%H:%M:%SZ', updated_at) AS updated_at FROM notes WHERE telegram_id = ? ORDER BY is_pinned DESC, updated_at DESC").bind(userId),
+        env.DB.prepare("SELECT id, category, title, content_raw, blocks_json, is_pinned, strftime('%Y-%m-%dT%H:%M:%SZ', updated_at) AS updated_at FROM notes WHERE telegram_id = ? ORDER BY updated_at DESC").bind(userId),
       ]);
 
       const userRow = results[0].results[0] as { language_code?: string } | undefined;
@@ -199,10 +199,11 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
   if (request.method === 'POST' && path === '/api/channels/delete') {
     try {
       const body = (await request.json()) as { id: string };
-      await env.DB.prepare('DELETE FROM channels WHERE id = ? AND telegram_id = ?')
-        .bind(body.id, userId)
+      await env.DB.prepare('DELETE FROM channels WHERE (id = ? OR id = ?) AND telegram_id = ?')
+        .bind(body.id, body.id.replace(/^-100/, '-'), userId)
         .run();
       console.log(`CHANNEL_DELETED_SUCCESS: channel=${body.id}, user=${userId}`);
+      await telegram.leaveChat(body.id);
       return new Response(JSON.stringify({ success: true }), {
         headers: { 'Content-Type': 'application/json' },
       });

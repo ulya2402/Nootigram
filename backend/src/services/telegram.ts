@@ -311,6 +311,23 @@ export class TelegramService {
     return res;
   }
 
+  async leaveChat(chatId: number | string): Promise<boolean> {
+    try {
+      const response = await fetch(`${this.baseUrl}/leaveChat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+        }),
+      });
+      const data = (await response.json()) as { ok: boolean };
+      return data.ok;
+    } catch (error) {
+      console.error(`TELEGRAM_FETCH_FAILED leaveChat: ${(error as Error).message}`);
+      return false;
+    }
+  }
+
   async answerCallbackQuery(callbackQueryId: string, text?: string): Promise<boolean> {
     try {
       const response = await fetch(`${this.baseUrl}/answerCallbackQuery`, {

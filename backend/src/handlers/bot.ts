@@ -109,17 +109,16 @@ export async function handleBotUpdate(update: TelegramUpdate, env: Env): Promise
         const countRow = await env.DB.prepare('SELECT COUNT(*) as total FROM channels WHERE telegram_id = ?')
           .bind(user.id)
           .first<{ total: number }>();
-
         const currentTotal = countRow?.total || 0;
         if (currentTotal < 5) {
           const rawId = String(chat.id);
           const channelIdStr = rawId.startsWith('-100') ? rawId : rawId.startsWith('-') ? `-100${rawId.slice(1)}` : `-100${rawId}`;
           const photoUrl = chat.username ? `https://t.me/i/userpic/320/${chat.username}.jpg` : null;
-
           await env.DB.prepare(`
             INSERT INTO channels (id, telegram_id, title, username, photo_url)
             VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
+              telegram_id = excluded.telegram_id,
               title = excluded.title,
               username = excluded.username,
               photo_url = excluded.photo_url
@@ -131,10 +130,12 @@ export async function handleBotUpdate(update: TelegramUpdate, env: Env): Promise
           console.warn(`CHANNEL_LIMIT_REACHED: user=${user.id}`);
         }
       } else if (isChannel && isDemoted) {
-        await env.DB.prepare('DELETE FROM channels WHERE id = ? AND telegram_id = ?')
-          .bind(String(chat.id), user.id)
+        const rawId = String(chat.id);
+        const channelIdStr = rawId.startsWith('-100') ? rawId : rawId.startsWith('-') ? `-100${rawId.slice(1)}` : `-100${rawId}`;
+        await env.DB.prepare('DELETE FROM channels WHERE id = ? OR id = ?')
+          .bind(channelIdStr, rawId)
           .run();
-        console.log(`CHANNEL_UNLINKED: channel=${chat.id}, user=${user.id}`);
+        console.log(`CHANNEL_UNLINKED: channel=${chat.id}`);
       }
       return new Response('OK', { status: 200 });
     }
