@@ -1705,11 +1705,20 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
           caption: b.caption || '',
         });
       } else if (b.type === 'audio') {
-        richBlocks.push({
-          type: 'audio',
-          url: b.url,
-          caption: b.caption || '',
-        });
+        const isSupportedAudio = /\.(mp3|ogg)(\?.*)?$/i.test(b.url);
+        if (isSupportedAudio) {
+          richBlocks.push({
+            type: 'audio',
+            url: b.url,
+            caption: b.caption || '',
+          });
+        } else {
+          richBlocks.push({
+            type: 'document',
+            url: b.url,
+            caption: b.caption || '',
+          });
+        }
       } else if (b.type === 'file') {
         richBlocks.push({
           type: 'document',
