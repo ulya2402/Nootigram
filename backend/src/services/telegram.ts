@@ -129,7 +129,7 @@ export class TelegramService {
         const text = this.formatInlineHtml(b.text);
         if (text) html += `<p>${text}</p>\n`;
       } else if (b.type === 'blockquote') {
-        const quoteText = b.blocks && b.blocks[0] && 'text' in b.blocks[0] ? (b.blocks[0] as any).text : '';
+        const quoteText = (b.blocks && b.blocks[0] && 'text' in b.blocks[0] ? (b.blocks[0] as any).text : '') || (b as any).text || '';
         const text = this.formatInlineHtml(quoteText);
         const cite = b.credit ? `<cite>${this.formatInlineHtml(b.credit)}</cite>` : '';
         if (text) html += `<blockquote>${text}${cite}</blockquote>\n\n`;
@@ -143,7 +143,11 @@ export class TelegramService {
         if (text) html += `<aside>${text}${cite}</aside>\n\n`;
       } else if (b.type === 'pre') {
         const langAttr = b.language ? ` class="language-${b.language}"` : '';
-        html += `<pre><code${langAttr}>${b.text}</code></pre>\n\n`;
+        const escapedCode = (b.text || '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;');
+        html += `<pre><code${langAttr}>${escapedCode}</code></pre>\n\n`;
       } else if (b.type === 'mathematical_expression') {
         html += `<tg-math-block>${b.expression}</tg-math-block>\n\n`;
       } else if (b.type === 'divider') {
@@ -172,7 +176,7 @@ export class TelegramService {
         if (isTask) {
           html += '<ul>';
           for (const it of b.items) {
-            const itText = it.blocks && it.blocks[0] && 'text' in it.blocks[0] ? (it.blocks[0] as any).text : '';
+            const itText = (it.blocks && it.blocks[0] && 'text' in it.blocks[0] ? (it.blocks[0] as any).text : '') || (it as any).text || '';
             const chk = it.is_checked ? ' checked' : '';
             html += `<li><input type="checkbox"${chk}>${this.formatInlineHtml(itText)}</li>`;
           }
@@ -180,20 +184,20 @@ export class TelegramService {
         } else if (isOrdered) {
           html += '<ol>';
           for (const it of b.items) {
-            const itText = it.blocks && it.blocks[0] && 'text' in it.blocks[0] ? (it.blocks[0] as any).text : '';
+            const itText = (it.blocks && it.blocks[0] && 'text' in it.blocks[0] ? (it.blocks[0] as any).text : '') || (it as any).text || '';
             html += `<li>${this.formatInlineHtml(itText)}</li>`;
           }
           html += '</ol>\n\n';
         } else {
           html += '<ul>';
           for (const it of b.items) {
-            const itText = it.blocks && it.blocks[0] && 'text' in it.blocks[0] ? (it.blocks[0] as any).text : '';
+            const itText = (it.blocks && it.blocks[0] && 'text' in it.blocks[0] ? (it.blocks[0] as any).text : '') || (it as any).text || '';
             html += `<li>${this.formatInlineHtml(itText)}</li>`;
           }
           html += '</ul>\n\n';
         }
       } else if (b.type === 'details') {
-        const detText = b.blocks && b.blocks[0] && 'text' in b.blocks[0] ? (b.blocks[0] as any).text : '';
+        const detText = (b.blocks && b.blocks[0] && 'text' in b.blocks[0] ? (b.blocks[0] as any).text : '') || (b as any).text || '';
         html += `<details><summary>${this.formatInlineHtml(b.summary)}</summary>${this.formatInlineHtml(detText)}</details>\n\n`;
       } else if (b.type === 'media') {
         const captionText = b.caption ? this.formatInlineHtml(b.caption) : '';

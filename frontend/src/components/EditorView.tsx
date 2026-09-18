@@ -2201,7 +2201,18 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                 )}
 
                 {block.type === 'code' && (
-                  <div className="bg-cream-surface/70 rounded p-2 my-1 font-code">
+                  <div className="bg-cream-surface/70 rounded-xl p-2.5 my-1.5 font-code border border-cream-divider/60 flex flex-col gap-1.5">
+                    <div className="flex items-center justify-between border-b border-cream-divider/40 pb-1">
+                      <span className="text-[10px] font-mono font-semibold uppercase text-warm-accent">Code Block</span>
+                      <input
+                        type="text"
+                        value={block.language || ''}
+                        placeholder="lang (e.g. python, js, html)"
+                        onFocus={() => setFocusedBlockIndex(index)}
+                        onChange={(e) => updateBlock(index, { ...block, language: e.target.value.toLowerCase().trim() })}
+                        className="text-[10px] font-mono text-warm-muted bg-transparent border-none focus:outline-none text-right placeholder:text-warm-subtle w-32"
+                      />
+                    </div>
                     <textarea
                       rows={1}
                       value={block.text}
