@@ -121,6 +121,27 @@ export async function fetchChannels(): Promise<{ channels: import('../types').Ch
   }
 }
 
+export async function uploadToCatbox(file: File): Promise<{ url: string }> {
+  const workerForm = new FormData();
+  workerForm.append('file', file);
+  const workerRes = await fetch(`${API_BASE}/api/media/catbox`, {
+    method: 'POST',
+    headers: {
+      Authorization: getAuthHeader(),
+    },
+    body: workerForm,
+  });
+
+  if (!workerRes.ok) {
+    const errJson = (await workerRes.json().catch(() => ({}))) as { error?: string };
+    console.error(`LITTERBOX_UPLOAD_FAILED: status=${workerRes.status}, error=${errJson.error}`);
+    throw new Error(errJson.error || 'UPLOAD_FAILED');
+  }
+
+  const result = (await workerRes.json()) as { success: boolean; url: string };
+  return { url: result.url };
+}
+
 export async function deleteChannelApi(id: string): Promise<boolean> {
   try {
     const response = await fetch(`${API_BASE}/api/channels/delete`, {

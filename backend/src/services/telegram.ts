@@ -236,6 +236,22 @@ export class TelegramService {
             html += `<img src="${b.images[0]}"/>\n\n`;
           }
         }
+      } else if (b.type === 'audio') {
+        const captionText = b.caption ? this.escapeText(b.caption) : '';
+        const safeUrl = this.escapeText(b.url);
+        if (captionText) {
+          html += `<figure><audio src="${safeUrl}"></audio><figcaption>${captionText}</figcaption></figure>\n\n`;
+        } else {
+          html += `<audio src="${safeUrl}"></audio>\n\n`;
+        }
+      } else if (b.type === 'document') {
+        const captionText = b.caption ? this.escapeText(b.caption) : '';
+        const safeUrl = this.escapeText(b.url);
+        if (captionText) {
+          html += `<figure><tg-document src="${safeUrl}"></tg-document><figcaption>${captionText}</figcaption></figure>\n\n`;
+        } else {
+          html += `<tg-document src="${safeUrl}"></tg-document>\n\n`;
+        }
       }
     }
     return html.trim();
@@ -291,6 +307,8 @@ export class TelegramService {
       .replace(/<figure>([\s\S]*?)<\/figure>/gi, '$1\n\n')
       .replace(/<figcaption>(.*?)<\/figcaption>/gi, '<i>$1</i>\n')
       .replace(/<img[^>]*src="([^"]*)"[^>]*>/gi, '<a href="$1">&#128444; Photo</a>\n')
+      .replace(/<audio[^>]*src="([^"]*)"[^>]*><\/audio>/gi, '<a href="$1">&#127925; Audio</a>\n')
+      .replace(/<tg-document[^>]*src="([^"]*)"[^>]*><\/tg-document>/gi, '<a href="$1">&#128206; Document</a>\n')
       .replace(/<li><input type="checkbox" checked>(.*?)<\/li>/gi, '  $1\n')
       .replace(/<li><input type="checkbox">(.*?)<\/li>/gi, '  $1\n')
       .replace(/<li>(.*?)<\/li>/gi, '  $1\n')

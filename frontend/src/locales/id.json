@@ -103,5 +103,13 @@
   "layout_slideshow": "Slide",
   "add_second_image": "Tambah Gambar ke-2",
   "image_limit_title": "Maksimal 2 gambar tercapai",
-  "image_uploading": "Mengunggah gambar..."
+  "image_uploading": "Mengunggah gambar...",
+  "tool_audio": "Audio",
+  "tool_file": "Berkas",
+  "audio_caption_placeholder": "Tulis keterangan audio...",
+  "file_caption_placeholder": "Tulis keterangan berkas...",
+  "file_size_exceeded": "Ukuran file melebihi batas 10 MB.",
+  "audio_limit_reached": "Maksimal 1 audio per catatan.",
+  "file_limit_reached": "Maksimal 1 berkas per catatan.",
+  "uploading_media": "Mengunggah..."
 }

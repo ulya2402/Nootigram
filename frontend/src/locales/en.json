@@ -103,5 +103,13 @@
   "layout_slideshow": "Slideshow",
   "add_second_image": "Add 2nd Photo",
   "image_limit_title": "Max 2 images reached",
-  "image_uploading": "Uploading image..."
+  "image_uploading": "Uploading image...",
+  "tool_audio": "Audio",
+  "tool_file": "File",
+  "audio_caption_placeholder": "Add audio caption...",
+  "file_caption_placeholder": "Add document caption...",
+  "file_size_exceeded": "File exceeds the 10 MB limit.",
+  "audio_limit_reached": "Maximum 1 audio track per note.",
+  "file_limit_reached": "Maximum 1 document file per note.",
+  "uploading_media": "Uploading..."
 }

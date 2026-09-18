@@ -63,6 +63,22 @@ export type ContentBlock =
       layout: 'single' | 'collage' | 'slideshow';
       images: MediaImageItem[];
       caption?: string;
+    }
+  | {
+      id: string;
+      type: 'audio';
+      url: string;
+      name: string;
+      size?: number;
+      caption?: string;
+    }
+  | {
+      id: string;
+      type: 'file';
+      url: string;
+      name: string;
+      size?: number;
+      caption?: string;
     };
 
 export interface NoteItem {

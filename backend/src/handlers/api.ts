@@ -278,6 +278,48 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
       return new Response(JSON.stringify({ error: 'EXPORT_FAILED' }), { status: 500 });
     }
   }
+  if (request.method === 'POST' && path === '/api/media/catbox') {
+    try {
+      const formData = await request.formData();
+      const file = formData.get('file') as unknown as File | null;
+      if (!file || typeof (file as any).arrayBuffer !== 'function') {
+        return new Response(JSON.stringify({ error: 'INVALID_FILE' }), { status: 400 });
+      }
+      if (file.size > 10 * 1024 * 1024) {
+        return new Response(JSON.stringify({ error: 'FILE_TOO_LARGE' }), { status: 400 });
+      }
+
+      const buffer = await file.arrayBuffer();
+      const blob = new Blob([buffer], { type: file.type || 'application/octet-stream' });
+      
+      const upstreamForm = new FormData();
+      upstreamForm.append('reqtype', 'fileupload');
+      upstreamForm.append('time', '72h');
+      upstreamForm.append('fileToUpload', blob, file.name || 'upload.bin');
+
+      const litterboxRes = await fetch('https://litterbox.catbox.moe/resources/internals/api.php', {
+        method: 'POST',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        },
+        body: upstreamForm,
+      });
+
+      const responseUrl = (await litterboxRes.text()).trim();
+      if (!litterboxRes.ok || !responseUrl.startsWith('http')) {
+        console.error(`LITTERBOX_UPSTREAM_FAILED: status=${litterboxRes.status}, body=${responseUrl}`);
+        return new Response(JSON.stringify({ error: 'UPLOAD_FAILED' }), { status: 502 });
+      }
+
+      return new Response(JSON.stringify({ success: true, url: responseUrl }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    } catch (error) {
+      console.error(`API_MEDIA_LITTERBOX_ERROR: ${(error as Error).message}`);
+      return new Response(JSON.stringify({ error: 'UPLOAD_FAILED' }), { status: 500 });
+    }
+  }
+
   if (request.method === 'POST' && path === '/api/media/upload') {
     try {
       const keys = (env.IMGBB_API_KEYS || '')

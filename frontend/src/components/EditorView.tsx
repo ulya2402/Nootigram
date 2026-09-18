@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from
 import { createPortal } from 'react-dom';
 import { NoteItem, ContentBlock, TaskItem, TableCell, TopicItem, MediaImageItem, ChannelItem } from '../types';
 import { t } from '../services/i18n';
-import { exportNoteToTelegram } from '../services/api';
+import { exportNoteToTelegram, uploadToCatbox } from '../services/api';
 import { uploadToImgbb, deleteFromImgbb } from '../services/imgbb';
 
 interface EditorViewProps {
@@ -193,12 +193,143 @@ export const EditorView: React.FC<EditorViewProps> = ({
     }));
   };
 const [uploadingBlockId, setUploadingBlockId] = useState<string | null>(null);
+const [uploadingMediaType, setUploadingMediaType] = useState<'image' | 'audio' | 'file' | null>(null);
 const fileInputRef = useRef<HTMLInputElement>(null);
+const audioInputRef = useRef<HTMLInputElement>(null);
+const docFileInputRef = useRef<HTMLInputElement>(null);
 const targetMediaBlockIndexRef = useRef<number | null>(null);
-
 const totalImageCount = currentNote.blocks.reduce((count, b) => {
   return b.type === 'media' ? count + (b.images?.length || 0) : count;
 }, 0);
+const totalAudioCount = currentNote.blocks.filter((b) => b.type === 'audio').length;
+const totalFileCount = currentNote.blocks.filter((b) => b.type === 'file').length;
+
+const formatFileSize = (bytes?: number): string => {
+  if (!bytes) return '';
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+const triggerUploadAudio = () => {
+  if (totalAudioCount >= 1) {
+    triggerHaptic('medium');
+    window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('warning');
+    alert(t('audio_limit_reached'));
+    return;
+  }
+  triggerHaptic('light');
+  audioInputRef.current?.click();
+};
+
+const triggerUploadDoc = () => {
+  if (totalFileCount >= 1) {
+    triggerHaptic('medium');
+    window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('warning');
+    alert(t('file_limit_reached'));
+    return;
+  }
+  triggerHaptic('light');
+  docFileInputRef.current?.click();
+};
+
+const handleAudioFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  e.target.value = '';
+  if (file.size > 10 * 1024 * 1024) {
+    triggerHaptic('heavy');
+    window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('error');
+    alert(t('file_size_exceeded'));
+    return;
+  }
+  setIsUploadingGlobal(true);
+  setUploadingMediaType('audio');
+  try {
+    const result = await uploadToCatbox(file);
+    const newBlock: ContentBlock = {
+      id: `b-audio-${Date.now()}`,
+      type: 'audio',
+      url: result.url,
+      name: file.name,
+      size: file.size,
+      caption: '',
+    };
+    const trailingParagraph: ContentBlock = {
+      id: `p-${Date.now()}`,
+      type: 'paragraph',
+      text: '',
+    };
+    const targetPos = focusedBlockIndex !== null && focusedBlockIndex >= 0 && focusedBlockIndex < currentNote.blocks.length
+      ? focusedBlockIndex + 1
+      : currentNote.blocks.length;
+    const nextBlocks = [
+      ...currentNote.blocks.slice(0, targetPos),
+      newBlock,
+      trailingParagraph,
+      ...currentNote.blocks.slice(targetPos),
+    ];
+    persistChange({ ...currentNote, blocks: nextBlocks }, true);
+    setFocusedBlockIndex(targetPos);
+    window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('success');
+  } catch (err) {
+    console.error(`AUDIO_UPLOAD_FAILED: ${(err as Error).message}`);
+    triggerHaptic('heavy');
+    setExportNotice(t('export_failed'));
+    setTimeout(() => setExportNotice(null), 3000);
+  } finally {
+    setIsUploadingGlobal(false);
+    setUploadingMediaType(null);
+  }
+};
+
+const handleDocFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  e.target.value = '';
+  if (file.size > 10 * 1024 * 1024) {
+    triggerHaptic('heavy');
+    alert(t('file_size_exceeded'));
+    return;
+  }
+  setIsUploadingGlobal(true);
+  setUploadingMediaType('file');
+  try {
+    const result = await uploadToCatbox(file);
+    const newBlock: ContentBlock = {
+      id: `b-doc-${Date.now()}`,
+      type: 'file',
+      url: result.url,
+      name: file.name,
+      size: file.size,
+      caption: '',
+    };
+    const trailingParagraph: ContentBlock = {
+      id: `p-${Date.now()}`,
+      type: 'paragraph',
+      text: '',
+    };
+    const targetPos = focusedBlockIndex !== null && focusedBlockIndex >= 0 && focusedBlockIndex < currentNote.blocks.length
+      ? focusedBlockIndex + 1
+      : currentNote.blocks.length;
+    const nextBlocks = [
+      ...currentNote.blocks.slice(0, targetPos),
+      newBlock,
+      trailingParagraph,
+      ...currentNote.blocks.slice(targetPos),
+    ];
+    persistChange({ ...currentNote, blocks: nextBlocks }, true);
+    setFocusedBlockIndex(targetPos);
+    triggerHaptic('medium');
+  } catch (err) {
+    console.error(`DOC_UPLOAD_FAILED: ${(err as Error).message}`);
+    triggerHaptic('heavy');
+    setExportNotice(t('export_failed'));
+    setTimeout(() => setExportNotice(null), 3000);
+  } finally {
+    setIsUploadingGlobal(false);
+    setUploadingMediaType(null);
+  }
+};
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [exportNotice, setExportNotice] = useState<string | null>(null);
   const [showToc, setShowToc] = useState<boolean>(false);
@@ -260,7 +391,7 @@ const totalImageCount = currentNote.blocks.reduce((count, b) => {
     });
   }, [currentNote.blocks]);
 
-  const triggerHaptic = (style: 'light' | 'medium' = 'light') => {
+  const triggerHaptic = (style: 'light' | 'medium' | 'heavy' | 'rigid' | 'soft' = 'light') => {
     window.Telegram?.WebApp?.HapticFeedback?.impactOccurred(style);
   };
 
@@ -1278,6 +1409,18 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
           images: b.images.map((img) => img.url),
           caption: b.caption || '',
         });
+      } else if (b.type === 'audio') {
+        richBlocks.push({
+          type: 'audio',
+          url: b.url,
+          caption: b.caption || '',
+        });
+      } else if (b.type === 'file') {
+        richBlocks.push({
+          type: 'document',
+          url: b.url,
+          caption: b.caption || '',
+        });
       }
     });
 
@@ -1305,6 +1448,21 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
         type="file"
         accept="image/*"
         onChange={handleFileSelected}
+        className="opacity-0 absolute -z-10 w-0 h-0 pointer-events-none"
+        tabIndex={-1}
+      />
+      <input
+        ref={audioInputRef}
+        type="file"
+        accept="audio/*"
+        onChange={handleAudioFileSelected}
+        className="opacity-0 absolute -z-10 w-0 h-0 pointer-events-none"
+        tabIndex={-1}
+      />
+      <input
+        ref={docFileInputRef}
+        type="file"
+        onChange={handleDocFileSelected}
         className="opacity-0 absolute -z-10 w-0 h-0 pointer-events-none"
         tabIndex={-1}
       />
@@ -1503,23 +1661,49 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
   </>
 )}
 {activeToolbarTab === 'media' && (
-  <div className="flex items-center gap-2">
+  <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
     <button
-                type="button"
-                onClick={() => appendBlockWithParagraph('media')}
-                disabled={totalImageCount >= 2 || isUploadingGlobal}
-                className="px-3 py-1 rounded-full bg-warm-accent text-white text-xs font-medium flex items-center gap-1.5 shrink-0 physics-bounce disabled:opacity-40"
-              >
-      {isUploadingGlobal ? (
+      type="button"
+      onClick={() => appendBlockWithParagraph('media')}
+      disabled={totalImageCount >= 2 || isUploadingGlobal}
+      className="px-2.5 py-1 rounded-full bg-warm-accent text-white text-xs font-medium flex items-center gap-1 shrink-0 physics-bounce disabled:opacity-40"
+    >
+      {isUploadingGlobal && uploadingMediaType === 'image' ? (
         <div className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin-fast" />
       ) : (
-        <span className="material-symbols-outlined text-[15px]">add_photo_alternate</span>
+        <span className="material-symbols-outlined text-[14px]">image</span>
       )}
-      <span>{isUploadingGlobal ? t('image_uploading') : t('tool_image')}</span>
+      <span>{t('tool_image')}</span>
+      <span className="text-[10px] font-mono opacity-80">{totalImageCount}/2</span>
     </button>
-    <span className="text-[11px] font-mono text-warm-muted">
-      {totalImageCount}/2
-    </span>
+    <button
+      type="button"
+      onClick={triggerUploadAudio}
+      disabled={totalAudioCount >= 1 || isUploadingGlobal}
+      className="px-2.5 py-1 rounded-full bg-cream-surface text-warm-text text-xs font-medium flex items-center gap-1 shrink-0 physics-bounce disabled:opacity-40"
+    >
+      {isUploadingGlobal && uploadingMediaType === 'audio' ? (
+        <div className="w-3 h-3 border-2 border-warm-accent border-t-transparent rounded-full animate-spin-fast" />
+      ) : (
+        <span className="material-symbols-outlined text-[14px] text-warm-accent">audiotrack</span>
+      )}
+      <span>{t('tool_audio')}</span>
+      <span className="text-[10px] font-mono text-warm-muted">{totalAudioCount}/1</span>
+    </button>
+    <button
+      type="button"
+      onClick={triggerUploadDoc}
+      disabled={totalFileCount >= 1 || isUploadingGlobal}
+      className="px-2.5 py-1 rounded-full bg-cream-surface text-warm-text text-xs font-medium flex items-center gap-1 shrink-0 physics-bounce disabled:opacity-40"
+    >
+      {isUploadingGlobal && uploadingMediaType === 'file' ? (
+        <div className="w-3 h-3 border-2 border-warm-accent border-t-transparent rounded-full animate-spin-fast" />
+      ) : (
+        <span className="material-symbols-outlined text-[14px] text-warm-accent">attach_file</span>
+      )}
+      <span>{t('tool_file')}</span>
+      <span className="text-[10px] font-mono text-warm-muted">{totalFileCount}/1</span>
+    </button>
   </div>
 )}
 {activeToolbarTab === 'table' && (
@@ -1838,6 +2022,81 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                       <span className="material-symbols-outlined text-[14px]">add</span>
                       <span>{t('add_task_item')}</span>
                     </button>
+                  </div>
+                )}
+                {block.type === 'audio' && (
+                  <div className="my-2.5 p-3 rounded-2xl bg-cream-surface/75 border border-cream-divider/80 flex flex-col gap-2.5 shadow-xs w-full min-w-0 transition-all">
+                    <div className="flex items-center justify-between gap-2 border-b border-cream-divider/50 pb-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className="w-8 h-8 rounded-full bg-warm-accent/10 text-warm-accent flex items-center justify-center shrink-0">
+                          <span className="material-symbols-outlined text-[18px]">audiotrack</span>
+                        </div>
+                        <div className="flex flex-col min-w-0">
+                          <span className="text-xs font-semibold text-warm-text truncate">{block.name}</span>
+                          <span className="text-[10px] font-mono text-warm-muted">{formatFileSize(block.size)}</span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeBlock(index)}
+                        className="w-6 h-6 rounded-full text-warm-subtle hover:text-red-600 flex items-center justify-center physics-bounce"
+                      >
+                        <span className="material-symbols-outlined text-[15px]">close</span>
+                      </button>
+                    </div>
+                    <audio
+                      controls
+                      preload="none"
+                      src={block.url}
+                      className="w-full h-8 rounded-lg outline-none"
+                    />
+                    <div className="border-t border-cream-divider/40 pt-1">
+                      <input
+                        type="text"
+                        value={block.caption || ''}
+                        placeholder={t('audio_caption_placeholder')}
+                        onFocus={() => setFocusedBlockIndex(index)}
+                        onChange={(e) => updateBlock(index, { ...block, caption: e.target.value })}
+                        className="w-full text-xs font-normal text-warm-text bg-transparent border-none focus:outline-none placeholder:text-warm-subtle"
+                      />
+                    </div>
+                  </div>
+                )}
+                {block.type === 'file' && (
+                  <div className="my-2.5 p-3 rounded-2xl bg-cream-surface/75 border border-cream-divider/80 flex flex-col gap-2 shadow-xs w-full min-w-0 transition-all">
+                    <div className="flex items-center justify-between gap-2">
+                      <a
+                        href={block.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2.5 min-w-0 flex-1 group/doc"
+                      >
+                        <div className="w-8 h-8 rounded-xl bg-warm-text text-[#FAF8F5] flex items-center justify-center shrink-0">
+                          <span className="material-symbols-outlined text-[18px]">attachment</span>
+                        </div>
+                        <div className="flex flex-col min-w-0">
+                          <span className="text-xs font-semibold text-warm-text group-hover/doc:text-warm-accent truncate transition-colors">{block.name}</span>
+                          <span className="text-[10px] font-mono text-warm-muted">{formatFileSize(block.size)}</span>
+                        </div>
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => removeBlock(index)}
+                        className="w-6 h-6 rounded-full text-warm-subtle hover:text-red-600 flex items-center justify-center physics-bounce"
+                      >
+                        <span className="material-symbols-outlined text-[15px]">close</span>
+                      </button>
+                    </div>
+                    <div className="border-t border-cream-divider/40 pt-1">
+                      <input
+                        type="text"
+                        value={block.caption || ''}
+                        placeholder={t('file_caption_placeholder')}
+                        onFocus={() => setFocusedBlockIndex(index)}
+                        onChange={(e) => updateBlock(index, { ...block, caption: e.target.value })}
+                        className="w-full text-xs font-normal text-warm-text bg-transparent border-none focus:outline-none placeholder:text-warm-subtle"
+                      />
+                    </div>
                   </div>
                 )}
                 {block.type === 'media' && (

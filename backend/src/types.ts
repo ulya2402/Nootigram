@@ -33,6 +33,16 @@ export type InputRichBlock =
        layout?: 'single' | 'collage' | 'slideshow';
        images: string[];
        caption?: string;
+     }
+  | {
+       type: 'audio';
+       url: string;
+       caption?: string;
+     }
+  | {
+       type: 'document';
+       url: string;
+       caption?: string;
      };
 
 export interface InputRichMessage {
