@@ -58,45 +58,67 @@ export class TelegramService {
     }
   }
 
+  private escapeText(text: string): string {
+    if (!text) return '';
+    return text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
   private formatInlineHtml(raw: string): string {
     if (!raw) return '';
     let formatted = raw
+      .replace(/<span\s+style="[^"]*font-weight:\s*(?:bold|700)[^"]*"[^>]*>([\s\S]*?)<\/span>/gi, '<b>$1</b>')
+      .replace(/<span\s+style="[^"]*font-style:\s*italic[^"]*"[^>]*>([\s\S]*?)<\/span>/gi, '<i>$1</i>')
+      .replace(/<span\s+style="[^"]*text-decoration:\s*underline[^"]*"[^>]*>([\s\S]*?)<\/span>/gi, '<u>$1</u>')
+      .replace(/<span\s+style="[^"]*text-decoration:\s*line-through[^"]*"[^>]*>([\s\S]*?)<\/span>/gi, '<s>$1</s>')
+      .replace(/<span[^>]*>/gi, '')
+      .replace(/<\/span>/gi, '')
       .replace(/<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/gi, '$1')
       .replace(/<h[1-6][^>]*>/gi, '')
       .replace(/<\/h[1-6]>/gi, '')
-      .replace(/<div><br\s*[\/]?>\s*<\/div>/gi, '<br>')
-      .replace(/<div>/gi, '<br>')
+      .replace(/<div><br\s*[\/]?>\s*<\/div>/gi, '\n')
+      .replace(/<div>/gi, '\n')
       .replace(/<\/div>/gi, '')
       .replace(/<p>/gi, '')
-      .replace(/<\/p>/gi, '<br>')
-      .replace(/\r\n|\r|\n/g, '<br>')
+      .replace(/<\/p>/gi, '\n')
+      .replace(/\r\n|\r/g, '\n')
+      .replace(/<br\s*[\/]?>/gi, '\n')
       .replace(/&nbsp;/gi, ' ')
-      .replace(/<strong>/gi, '<b>')
-      .replace(/<\/strong>/gi, '</b>')
-      .replace(/<em>/gi, '<i>')
-      .replace(/<\/em>/gi, '</i>')
-      .replace(/<ins>/gi, '<u>')
-      .replace(/<\/ins>/gi, '</u>')
-      .replace(/<del>/gi, '<s>')
-      .replace(/<\/del>/gi, '</s>')
-      .replace(/<strike>/gi, '<s>')
-      .replace(/<\/strike>/gi, '</s>')
-      .replace(/<span[^>]*>/gi, '')
-      .replace(/<\/span>/gi, '')
-      .replace(/(?:<br\s*[\/]?>\s*){3,}/gi, '<br><br>')
-      .replace(/(<br\s*[\/]?>\s*)+$/gi, '')
-      .replace(/^(<br\s*[\/]?>\s*)+/gi, '')
+      .replace(/\n{3,}/g, '\n\n')
       .trim();
 
-    const testClean = formatted.trim();
-    if (/^<b>[\s\S]*<\/b>$/i.test(testClean) && testClean.length > 80) {
-      const inner = testClean.replace(/^<b>/i, '').replace(/<\/b>$/i, '').trim();
-      if (!inner.includes('<b>') && !inner.includes('</b>')) {
-        formatted = inner;
-      }
-    }
+    const tokens = formatted.split(/(<[^>]+>)/g);
+    formatted = tokens
+      .map((part) => {
+        if (!part) return '';
+        if (part.startsWith('<') && part.endsWith('>')) {
+          if (/^<(?:b|strong)(?:\s+[^>]*)?>$/i.test(part)) return '<b>';
+          if (/^<\/(?:b|strong)>$/i.test(part)) return '</b>';
+          if (/^<(?:i|em)(?:\s+[^>]*)?>$/i.test(part)) return '<i>';
+          if (/^<\/(?:i|em)>$/i.test(part)) return '</i>';
+          if (/^<(?:u|ins)(?:\s+[^>]*)?>$/i.test(part)) return '<u>';
+          if (/^<\/(?:u|ins)>$/i.test(part)) return '</u>';
+          if (/^<(?:s|strike|del)(?:\s+[^>]*)?>$/i.test(part)) return '<s>';
+          if (/^<\/(?:s|strike|del)>$/i.test(part)) return '</s>';
+          if (/^<code>$/i.test(part)) return '<code>';
+          if (/^<\/code>$/i.test(part)) return '</code>';
+          if (/^<tg-spoiler>$/i.test(part)) return '<tg-spoiler>';
+          if (/^<\/tg-spoiler>$/i.test(part)) return '</tg-spoiler>';
+          if (/^<a\s+href="[^"]*">$/i.test(part)) return part;
+          if (/^<\/a>$/i.test(part)) return '</a>';
+          return part.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+        return part
+          .replace(/&(?!((?:lt|gt|amp|quot|apos|nbsp|hellip|mdash|ndash|lsquo|rsquo|ldquo|rdquo)|#\d+|#x[0-9a-fA-F]+);)/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;');
+      })
+      .join('');
 
-    const tags = ['b', 'i', 'u', 's', 'code', 'tg-spoiler'];
+    const tags = ['b', 'i', 'u', 's', 'code', 'tg-spoiler', 'a'];
     for (const tag of tags) {
       const openCount = (formatted.match(new RegExp(`<${tag}(?:\\s[^>]*)?>`, 'gi')) || []).length;
       const closeCount = (formatted.match(new RegExp(`</${tag}>`, 'gi')) || []).length;
@@ -113,17 +135,19 @@ export class TelegramService {
         });
       }
     }
-    return formatted;
+
+    return formatted.trim();
   }
 
   private buildRichHtml(richMessage: InputRichMessage): string {
     if (richMessage.html) return this.formatInlineHtml(richMessage.html);
     if (!richMessage.blocks) return '';
+
     let html = '';
     for (const b of richMessage.blocks) {
       if (b.type === 'heading') {
         const size = b.size || 2;
-        const text = this.formatInlineHtml(b.text);
+        const text = this.escapeText(b.text);
         if (text) html += `<h${size}>${text}</h${size}>\n`;
       } else if (b.type === 'paragraph') {
         const text = this.formatInlineHtml(b.text);
@@ -131,22 +155,19 @@ export class TelegramService {
       } else if (b.type === 'blockquote') {
         const quoteText = (b.blocks && b.blocks[0] && 'text' in b.blocks[0] ? (b.blocks[0] as any).text : '') || (b as any).text || '';
         const text = this.formatInlineHtml(quoteText);
-        const cite = b.credit ? `<cite>${this.formatInlineHtml(b.credit)}</cite>` : '';
+        const cite = b.credit ? `<cite>${this.escapeText(b.credit)}</cite>` : '';
         if (text) html += `<blockquote>${text}${cite}</blockquote>\n\n`;
       } else if (b.type === 'expandable_blockquote') {
         const text = this.formatInlineHtml(b.text);
-        const cite = b.credit ? `<cite>${this.formatInlineHtml(b.credit)}</cite>` : '';
+        const cite = b.credit ? `<cite>${this.escapeText(b.credit)}</cite>` : '';
         if (text) html += `<blockquote expandable>${text}${cite}</blockquote>\n\n`;
       } else if (b.type === 'pullquote') {
         const text = this.formatInlineHtml(b.text);
-        const cite = b.credit ? `<cite>${this.formatInlineHtml(b.credit)}</cite>` : '';
+        const cite = b.credit ? `<cite>${this.escapeText(b.credit)}</cite>` : '';
         if (text) html += `<aside>${text}${cite}</aside>\n\n`;
       } else if (b.type === 'pre') {
-        const langAttr = b.language ? ` class="language-${b.language}"` : '';
-        const escapedCode = (b.text || '')
-          .replace(/&/g, '&amp;')
-          .replace(/</g, '&lt;')
-          .replace(/>/g, '&gt;');
+        const langAttr = b.language ? ` class="language-${this.escapeText(b.language)}"` : '';
+        const escapedCode = this.escapeText(b.text || '');
         html += `<pre><code${langAttr}>${escapedCode}</code></pre>\n\n`;
       } else if (b.type === 'mathematical_expression') {
         html += `<tg-math-block>${b.expression}</tg-math-block>\n\n`;
@@ -158,13 +179,13 @@ export class TelegramService {
         if (b.is_striped) attrs += ' striped';
         if (b.is_compact) attrs += ' compact';
         let tbl = `<table${attrs}>`;
-        if (b.caption) tbl += `<caption>${this.formatInlineHtml(b.caption)}</caption>`;
+        if (b.caption) tbl += `<caption>${this.escapeText(b.caption)}</caption>`;
         for (let rIdx = 0; rIdx < b.cells.length; rIdx++) {
           tbl += '<tr>';
           for (const cell of b.cells[rIdx]) {
             const tag = cell.is_header || rIdx === 0 ? 'th' : 'td';
             const align = cell.align ? ` align="${cell.align}"` : '';
-            tbl += `<${tag}${align}>${this.formatInlineHtml(cell.text)}</${tag}>`;
+            tbl += `<${tag}${align}>${this.escapeText(cell.text)}</${tag}>`;
           }
           tbl += '</tr>';
         }
@@ -178,29 +199,29 @@ export class TelegramService {
           for (const it of b.items) {
             const itText = (it.blocks && it.blocks[0] && 'text' in it.blocks[0] ? (it.blocks[0] as any).text : '') || (it as any).text || '';
             const chk = it.is_checked ? ' checked' : '';
-            html += `<li><input type="checkbox"${chk}>${this.formatInlineHtml(itText)}</li>`;
+            html += `<li><input type="checkbox"${chk}>${this.escapeText(itText)}</li>`;
           }
           html += '</ul>\n\n';
         } else if (isOrdered) {
           html += '<ol>';
           for (const it of b.items) {
             const itText = (it.blocks && it.blocks[0] && 'text' in it.blocks[0] ? (it.blocks[0] as any).text : '') || (it as any).text || '';
-            html += `<li>${this.formatInlineHtml(itText)}</li>`;
+            html += `<li>${this.escapeText(itText)}</li>`;
           }
           html += '</ol>\n\n';
         } else {
           html += '<ul>';
           for (const it of b.items) {
             const itText = (it.blocks && it.blocks[0] && 'text' in it.blocks[0] ? (it.blocks[0] as any).text : '') || (it as any).text || '';
-            html += `<li>${this.formatInlineHtml(itText)}</li>`;
+            html += `<li>${this.escapeText(itText)}</li>`;
           }
           html += '</ul>\n\n';
         }
       } else if (b.type === 'details') {
         const detText = (b.blocks && b.blocks[0] && 'text' in b.blocks[0] ? (b.blocks[0] as any).text : '') || (b as any).text || '';
-        html += `<details><summary>${this.formatInlineHtml(b.summary)}</summary>${this.formatInlineHtml(detText)}</details>\n\n`;
+        html += `<details><summary>${this.escapeText(b.summary)}</summary>${this.formatInlineHtml(detText)}</details>\n\n`;
       } else if (b.type === 'media') {
-        const captionText = b.caption ? this.formatInlineHtml(b.caption) : '';
+        const captionText = b.caption ? this.escapeText(b.caption) : '';
         const captionTag = captionText ? `<figcaption>${captionText}</figcaption>` : '';
         if (b.layout === 'slideshow' && b.images.length > 1) {
           const imgs = b.images.map((src) => `<img src="${src}"/>`).join('');
@@ -209,7 +230,11 @@ export class TelegramService {
           const imgs = b.images.map((src) => `<img src="${src}"/>`).join('');
           html += `<tg-collage>${imgs}${captionTag}</tg-collage>\n\n`;
         } else if (b.images.length > 0) {
-          html += `<figure><img src="${b.images[0]}"/>${captionTag}</figure>\n\n`;
+          if (captionTag) {
+            html += `<figure><img src="${b.images[0]}"/>${captionTag}</figure>\n\n`;
+          } else {
+            html += `<img src="${b.images[0]}"/>\n\n`;
+          }
         }
       }
     }
@@ -260,7 +285,7 @@ export class TelegramService {
       .replace(/<details><summary>(.*?)<\/summary>([\s\S]*?)<\/details>/gi, '<b>$1</b>\n<blockquote>$2</blockquote>\n\n')
       .replace(/<aside>(.*?)<\/aside>/gi, '<blockquote>$1</blockquote>\n\n')
       .replace(/<tg-math-block>(.*?)<\/tg-math-block>/gi, '<pre><code>$1</code></pre>\n\n')
-      .replace(/<hr\s*[\/]?>/gi, ' \n\n')
+      .replace(/<hr\s*[\/]?>/gi, '—\n\n')
       .replace(/<tg-collage>([\s\S]*?)<\/tg-collage>/gi, '$1\n\n')
       .replace(/<tg-slideshow>([\s\S]*?)<\/tg-slideshow>/gi, '$1\n\n')
       .replace(/<figure>([\s\S]*?)<\/figure>/gi, '$1\n\n')
@@ -270,10 +295,12 @@ export class TelegramService {
       .replace(/<li><input type="checkbox">(.*?)<\/li>/gi, '  $1\n')
       .replace(/<li>(.*?)<\/li>/gi, '  $1\n')
       .replace(/<ul[^>]*>|<\/ul>|<ol[^>]*>|<\/ol>/gi, '')
-        .replace(/<h[1-6]>([\s\S]*?)<\/h[1-6]>/gi, '<b>$1</b>\n\n')
-        .replace(/<p>([\s\S]*?)<\/p>/gi, '$1\n\n')
-        .replace(/\n{3,}/g, '\n\n')
-        .trim();
+      .replace(/<h[1-6]>([\s\S]*?)<\/h[1-6]>/gi, '<b>$1</b>\n\n')
+      .replace(/<p>([\s\S]*?)<\/p>/gi, '$1\n\n')
+      .replace(/<br\s*[\/]?>/gi, '\n')
+      .replace(/<(?:mark|sub|sup)>([\s\S]*?)<\/(?:mark|sub|sup)>/gi, '$1')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
     const finalHtml = adaptedHtml || 'Empty note';
     const res = await this.sendMessage(chatId, finalHtml, undefined, 'HTML');
     if (!res.ok && res.errorCode === 400) {

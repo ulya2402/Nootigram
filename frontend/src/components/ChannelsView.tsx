@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ChannelItem } from '../types';
 import { t } from '../services/i18n';
 import { deleteChannelApi } from '../services/api';
@@ -23,9 +23,14 @@ export const ChannelsView: React.FC<ChannelsViewProps> = ({
     window.Telegram?.WebApp?.HapticFeedback?.impactOccurred(style);
   };
 
+  const lastCheckRef = useRef<number>(0);
+
   useEffect(() => {
     const prevCount = channels.length;
     const checkUpdate = async () => {
+      const now = Date.now();
+      if (now - lastCheckRef.current < 2000) return;
+      lastCheckRef.current = now;
       const updated = await onRefresh();
       if (updated.length > prevCount) {
         triggerHaptic('medium');
@@ -34,11 +39,16 @@ export const ChannelsView: React.FC<ChannelsViewProps> = ({
         setTimeout(() => setAlertNotice(null), 3500);
       }
     };
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        checkUpdate();
+      }
+    };
     window.addEventListener('focus', checkUpdate);
-    document.addEventListener('visibilitychange', checkUpdate);
+    document.addEventListener('visibilitychange', handleVisibility);
     return () => {
       window.removeEventListener('focus', checkUpdate);
-      document.removeEventListener('visibilitychange', checkUpdate);
+      document.removeEventListener('visibilitychange', handleVisibility);
     };
   }, [channels.length, onRefresh]);
 
@@ -68,84 +78,73 @@ export const ChannelsView: React.FC<ChannelsViewProps> = ({
 
   return (
     <div className="flex flex-col w-full px-6 safe-bottom-space animate-page-fade">
-      <section className="pt-2 pb-3 border-b border-cream-divider flex items-center justify-between">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-semibold text-warm-accent tracking-widest uppercase">
+      <section className="pt-3 pb-4 border-b border-cream-divider flex flex-col gap-2">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-[11px] font-semibold text-warm-accent tracking-wider uppercase">
               {t('channels_title')}
             </span>
-            <span className="text-[10px] font-mono font-medium px-1.5 py-0.2 rounded-full bg-cream-surface border border-cream-divider text-warm-muted">
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cream-surface border border-cream-divider text-warm-muted">
               {channels.length}/5
             </span>
           </div>
-          <p className="text-xs text-warm-muted mt-0.5">{t('channels_sub')}</p>
+          <button
+            type="button"
+            onClick={handleConnectChannel}
+            disabled={channels.length >= 5}
+            className="h-8 px-3.5 rounded-full bg-warm-text text-[#FAF8F5] text-xs font-semibold flex items-center gap-1.5 physics-bounce disabled:opacity-40 shrink-0 select-none"
+          >
+            <span className="material-symbols-outlined text-[15px] leading-none">add</span>
+            <span>{t('add_channel')}</span>
+          </button>
         </div>
-        <button
-          onClick={handleConnectChannel}
-          disabled={channels.length >= 5}
-          className="px-3 py-1.5 rounded-full bg-warm-text text-[#FAF8F5] text-xs font-semibold flex items-center gap-1 physics-bounce disabled:opacity-40"
-        >
-          <span className="material-symbols-outlined text-[15px]">add</span>
-          <span>{t('add_channel')}</span>
-        </button>
+        <p className="text-xs text-warm-muted leading-relaxed">
+          {t('channels_sub')}
+        </p>
       </section>
 
       {alertNotice && (
-        <div className="my-2 p-2.5 rounded-lg bg-cream-surface border border-cream-divider text-xs text-warm-accent font-medium flex items-center justify-between animate-page-fade">
-          <span>{alertNotice}</span>
-          <button onClick={() => setAlertNotice(null)} className="text-warm-muted hover:text-warm-text">
+        <div className="my-3 p-3 rounded-xl bg-cream-surface border border-warm-accent/30 text-xs text-warm-accent font-medium flex items-center justify-between gap-2 animate-page-fade">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="material-symbols-outlined text-[16px] shrink-0">check_circle</span>
+            <span className="truncate">{alertNotice}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setAlertNotice(null)}
+            className="w-6 h-6 rounded-full flex items-center justify-center text-warm-muted hover:text-warm-text shrink-0"
+          >
             <span className="material-symbols-outlined text-[15px]">close</span>
           </button>
         </div>
       )}
 
-      <section className="pt-2 pb-3 border-b border-cream-divider/60 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="text-xs font-semibold text-warm-text uppercase tracking-wider truncate">
-            {t('channels_title')}
-          </span>
-          <span className="text-[10px] font-mono font-medium px-1.5 py-0.5 rounded bg-cream-surface border border-cream-divider/60 text-warm-muted shrink-0">
-            {channels.length}/5
-          </span>
-        </div>
-        <button
-          onClick={handleConnectChannel}
-          disabled={channels.length >= 5}
-          className="h-7 px-2.5 rounded-full bg-warm-text text-[#FAF8F5] text-[11px] font-medium flex items-center gap-1 physics-bounce disabled:opacity-40 shrink-0"
-        >
-          <span className="material-symbols-outlined text-[14px] leading-none">add</span>
-          <span>{t('add_channel')}</span>
-        </button>
-      </section>
-
-      {alertNotice && (
-        <div className="my-2 p-2 rounded-lg bg-cream-surface border border-cream-divider text-xs text-warm-accent font-medium flex items-center justify-between animate-page-fade">
-          <span>{alertNotice}</span>
-          <button onClick={() => setAlertNotice(null)} className="text-warm-muted hover:text-warm-text">
-            <span className="material-symbols-outlined text-[14px]">close</span>
-          </button>
-        </div>
-      )}
-
       {channels.length === 0 ? (
-        <div className="py-20 text-center flex flex-col items-center justify-center gap-1.5 text-xs text-warm-muted select-none">
-          <span className="material-symbols-outlined text-3xl text-warm-subtle">hub</span>
-          <span className="pt-1">{t('empty_channels')}</span>
+        <div className="my-8 py-12 px-6 rounded-2xl bg-cream-surface/30 border border-cream-divider flex flex-col items-center justify-center text-center gap-2 select-none animate-page-fade">
+          <div className="w-10 h-10 rounded-xl bg-cream-surface border border-cream-divider flex items-center justify-center text-warm-accent mb-1">
+            <span className="material-symbols-outlined text-xl leading-none">campaign</span>
+          </div>
+          <span className="text-xs font-semibold text-warm-text">{t('empty_channels')}</span>
+          <p className="text-[11px] text-warm-muted max-w-[260px] leading-relaxed">
+            {t('channels_sub')}
+          </p>
         </div>
       ) : (
-        <div className="flex flex-col py-1">
+        <div className="flex flex-col gap-2 py-4">
           {channels.map((channel) => (
             <div
               key={channel.id}
-              className="py-2.5 border-b border-cream-divider/40 flex items-center justify-between gap-3 group transition-colors"
+              className="p-3.5 rounded-xl bg-cream-surface/60 border border-cream-divider/80 flex items-center justify-between gap-3 group transition-colors select-none hover:bg-cream-surface"
             >
-              <div className="flex items-center gap-2.5 min-w-0">
-                <div className="w-8 h-8 rounded-full bg-cream-surface border border-cream-divider/80 flex items-center justify-center shrink-0 text-warm-accent select-none">
-                  <span className="material-symbols-outlined text-[16px] leading-none">tag</span>
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-9 h-9 rounded-lg bg-[#FAF8F5] border border-cream-divider flex items-center justify-center shrink-0 text-warm-accent">
+                  <span className="material-symbols-outlined text-[18px] leading-none">campaign</span>
                 </div>
                 <div className="flex flex-col min-w-0">
-                  <h4 className="text-xs font-semibold text-warm-text truncate leading-tight">{channel.title}</h4>
-                  <span className="text-[11px] font-mono text-warm-muted truncate leading-tight pt-0.5">
+                  <h4 className="text-xs font-semibold text-warm-text truncate leading-snug">
+                    {channel.title}
+                  </h4>
+                  <span className="text-[11px] font-mono text-warm-muted truncate leading-snug pt-0.5">
                     {channel.username ? `@${channel.username}` : `ID: ${channel.id}`}
                   </span>
                 </div>
@@ -153,9 +152,9 @@ export const ChannelsView: React.FC<ChannelsViewProps> = ({
               <button
                 type="button"
                 onClick={() => handleDelete(channel.id)}
-                className="w-7 h-7 rounded-full flex items-center justify-center text-warm-subtle hover:text-red-600 active:scale-90 transition-all shrink-0"
+                className="w-8 h-8 rounded-lg flex items-center justify-center text-warm-subtle hover:text-red-600 hover:bg-[#FAF8F5] border border-transparent hover:border-cream-divider active:scale-90 transition-all shrink-0"
               >
-                <span className="material-symbols-outlined text-[16px]">delete</span>
+                <span className="material-symbols-outlined text-[17px]">delete</span>
               </button>
             </div>
           ))}

@@ -34,26 +34,22 @@ export const App: React.FC = () => {
   const [channels, setChannels] = useState<ChannelItem[]>([]);
   const [botUsername, setBotUsername] = useState<string>('');
 
+  const isFetchingChannelsRef = useRef<boolean>(false);
   const refreshChannels = useCallback(async () => {
-    const res = await fetchChannels();
-    if (res.channels) setChannels(res.channels);
-    if (res.bot_username) setBotUsername(res.bot_username);
-    return res.channels || [];
-  }, []);
+    if (isFetchingChannelsRef.current) return channels;
+    isFetchingChannelsRef.current = true;
+    try {
+      const res = await fetchChannels();
+      if (res.channels) setChannels(res.channels);
+      if (res.bot_username) setBotUsername(res.bot_username);
+      return res.channels || [];
+    } finally {
+      isFetchingChannelsRef.current = false;
+    }
+  }, [channels]);
 
   useEffect(() => {
     refreshChannels();
-    const handleRecheck = () => {
-      if (document.visibilityState === 'visible') {
-        refreshChannels();
-      }
-    };
-    document.addEventListener('visibilitychange', handleRecheck);
-    window.addEventListener('focus', handleRecheck);
-    return () => {
-      document.removeEventListener('visibilitychange', handleRecheck);
-      window.removeEventListener('focus', handleRecheck);
-    };
   }, [refreshChannels]);
   const [, setCurrentLang] = useState<string>(() => localStorage.getItem('notigram_lang') || 'en');
 
@@ -218,11 +214,17 @@ export const App: React.FC = () => {
   };
 
   const handleSaveNote = (updated: NoteItem) => {
-    const exists = notes.some((n) => n.id === updated.id);
-    const nextNotes = exists ? notes.map((n) => (n.id === updated.id ? updated : n)) : [updated, ...notes];
+    const resolvedPinned = updated.is_favorite !== undefined ? updated.is_favorite : updated.is_pinned;
+    const normalizedNote: NoteItem = {
+      ...updated,
+      is_pinned: resolvedPinned,
+      is_favorite: resolvedPinned,
+    };
+    const exists = notes.some((n) => n.id === normalizedNote.id);
+    const nextNotes = exists ? notes.map((n) => (n.id === normalizedNote.id ? normalizedNote : n)) : [normalizedNote, ...notes];
     setNotes(nextNotes);
     localStorage.setItem(getStorageKey('notigram_user_notes'), JSON.stringify(nextNotes));
-    pendingNotesRef.current.set(updated.id, updated);
+    pendingNotesRef.current.set(normalizedNote.id, normalizedNote);
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
     }
@@ -277,7 +279,13 @@ export const App: React.FC = () => {
 
   const handleToggleFavorite = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    const nextNotes = notes.map((n) => (n.id === id ? { ...n, is_favorite: !n.is_favorite } : n));
+    const nextNotes = notes.map((n) => {
+      if (n.id === id) {
+        const nextFav = !n.is_favorite;
+        return { ...n, is_favorite: nextFav, is_pinned: nextFav };
+      }
+      return n;
+    });
     setNotes(nextNotes);
     localStorage.setItem(getStorageKey('notigram_user_notes'), JSON.stringify(nextNotes));
     const target = nextNotes.find((n) => n.id === id);

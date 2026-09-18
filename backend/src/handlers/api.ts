@@ -87,6 +87,7 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
       const statements: D1PreparedStatement[] = [];
 
       for (const note of body.notes) {
+        const isPinnedValue = (note as any).is_favorite !== undefined ? ((note as any).is_favorite ? 1 : 0) : (note.is_pinned ? 1 : 0);
         statements.push(
           env.DB.prepare(`
             INSERT INTO notes (id, telegram_id, category, title, content_raw, blocks_json, is_pinned, updated_at)
@@ -105,7 +106,7 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
             note.title,
             note.content_raw || '',
             JSON.stringify(note.blocks || []),
-            note.is_pinned ? 1 : 0
+            isPinnedValue
           )
         );
       }

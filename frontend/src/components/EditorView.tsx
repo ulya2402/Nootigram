@@ -73,9 +73,13 @@ const EditableBlock: React.FC<{
   onKeyDown?: (e: React.KeyboardEvent<HTMLDivElement>) => void;
 }> = ({ html, placeholder, className, onFocus, onChange, onKeyDown }) => {
   const divRef = useRef<HTMLDivElement>(null);
+  const lastHtmlRef = useRef<string | null>(null);
+
   useEffect(() => {
-    if (divRef.current && divRef.current.innerHTML !== html) {
+    if (!divRef.current) return;
+    if (lastHtmlRef.current === null || html !== lastHtmlRef.current) {
       divRef.current.innerHTML = html || '';
+      lastHtmlRef.current = html;
     }
   }, [html]);
 
@@ -93,7 +97,14 @@ const EditableBlock: React.FC<{
       data-placeholder={placeholder}
       onFocus={onFocus}
       onInput={(e) => {
-        onChange(e.currentTarget.innerHTML);
+        const currentHtml = e.currentTarget.innerHTML;
+        lastHtmlRef.current = currentHtml;
+        onChange(currentHtml);
+      }}
+      onBlur={(e) => {
+        const currentHtml = e.currentTarget.innerHTML;
+        lastHtmlRef.current = currentHtml;
+        onChange(currentHtml);
       }}
       onKeyDown={onKeyDown}
       onPaste={handlePaste}
@@ -571,13 +582,16 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
     updateActiveFormats();
   };
 
+  const onBackRef = useRef(onBack);
+  onBackRef.current = onBack;
+
   const handleSafeBack = useCallback(() => {
     pendingDeletionsRef.current.forEach((url) => {
       deleteFromImgbb(url);
     });
     pendingDeletionsRef.current.clear();
-    onBack();
-  }, [onBack]);
+    onBackRef.current();
+  }, []);
 
   useEffect(() => {
     const tg = window.Telegram?.WebApp;
