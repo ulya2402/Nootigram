@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { NoteItem, ContentBlock, TaskItem, TableCell, TopicItem, MediaImageItem } from '../types';
+import { NoteItem, ContentBlock, TaskItem, TableCell, TopicItem, MediaImageItem, ChannelItem } from '../types';
 import { t } from '../services/i18n';
 import { exportNoteToTelegram } from '../services/api';
 import { uploadToImgbb, deleteFromImgbb } from '../services/imgbb';
@@ -8,6 +8,7 @@ import { uploadToImgbb, deleteFromImgbb } from '../services/imgbb';
 interface EditorViewProps {
   note: NoteItem;
   topics: TopicItem[];
+  channels?: ChannelItem[];
   onBack: () => void;
   onSave: (updated: NoteItem) => void;
   onDelete: (id: string) => void;
@@ -96,6 +97,7 @@ const EditableBlock: React.FC<{
 export const EditorView: React.FC<EditorViewProps> = ({
   note,
   topics,
+  channels = [],
   onBack,
   onSave,
   onDelete,
@@ -1153,10 +1155,34 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
     setTimeout(() => setExportNotice(null), 2500);
   };
 
+  const [showExportModal, setShowExportModal] = useState<boolean>(false);
+  const [selectedExportChannels, setSelectedExportChannels] = useState<string[]>([]);
+  const [sendToUserChat, setSendToUserChat] = useState<boolean>(true);
+
+  const toggleChannelSelection = (chId: string) => {
+    triggerHaptic('light');
+    setSelectedExportChannels((prev) =>
+      prev.includes(chId) ? prev.filter((id) => id !== chId) : [...prev, chId]
+    );
+  };
+
   const handleExport = async () => {
+    if (selectedExportChannels.length > 0) {
+      const adUrl = 'https://omg10.com/4/11046598';
+      const tg = window.Telegram?.WebApp;
+      try {
+        if (tg?.openLink) {
+          tg.openLink(adUrl);
+        } else {
+          window.open(adUrl, '_blank');
+        }
+      } catch (e) {
+        console.warn('LINK_OPEN_FALLBACK', e);
+      }
+    }
+
     triggerHaptic('medium');
     setIsExporting(true);
-
     const richBlocks: any[] = [];
     if (currentNote.title.trim()) {
       richBlocks.push({ type: 'heading', size: 1, text: currentNote.title });
@@ -1228,11 +1254,16 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
     });
 
     const exportPayload = {
-      ...currentNote,
-      blocks: richBlocks as any,
+      note_id: currentNote.id,
+      note: {
+        ...currentNote,
+        blocks: richBlocks as any,
+      },
+      target_channel_ids: selectedExportChannels,
+      send_to_user: sendToUserChat,
     };
-
     await executeExport(exportPayload);
+    setShowExportModal(false);
   };
 
   return (
@@ -1284,9 +1315,20 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
           </div>
           <div className="flex items-center gap-1.5">
             <button
-              onClick={handleExport}
+              onClick={() => {
+                triggerHaptic('light');
+                setIsEditorActive(false);
+                if (document.activeElement instanceof HTMLElement) {
+                  document.activeElement.blur();
+                }
+                setShowExportModal(true);
+              }}
               disabled={isExporting}
-              className="h-7 px-3 rounded-full bg-warm-text text-[#FAF8F5] text-xs font-medium flex items-center gap-1.5 active:scale-95 transition-all disabled:opacity-80"
+              className={`h-7 px-3 rounded-full text-xs font-medium flex items-center gap-1.5 active:scale-95 transition-all disabled:opacity-80 ${
+                selectedExportChannels.length > 0
+                  ? 'bg-warm-accent text-[#FAF8F5]'
+                  : 'bg-warm-text text-[#FAF8F5]'
+              }`}
             >
               {isExporting ? (
                 <>
@@ -1295,8 +1337,15 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                 </>
               ) : (
                 <>
-                  <span className="material-symbols-outlined text-[13px]">ios_share</span>
-                  <span>{exportNotice || t('export_rich')}</span>
+                  <span className="material-symbols-outlined text-[13px]">
+                    {selectedExportChannels.length > 0 ? 'campaign' : 'ios_share'}
+                  </span>
+                  <span>
+                    {exportNotice ||
+                      (selectedExportChannels.length > 0
+                        ? t('export_with_ad')
+                        : t('export_rich'))}
+                  </span>
                 </>
               )}
             </button>
@@ -2277,7 +2326,7 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
 
       
 
-      {isEditorActive &&
+      {isEditorActive && !showExportModal &&
         createPortal(
           <div
             data-format-bar="true"
@@ -2368,6 +2417,120 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                   format_clear
                 </span>
               </button>
+            </div>
+          </div>,
+          document.body
+        )}
+      {showExportModal &&
+        createPortal(
+          <div
+            onClick={() => {
+              if (!isExporting) setShowExportModal(false);
+            }}
+            className="fixed inset-0 z-50 flex flex-col justify-end bg-[#24201D]/45 transition-opacity duration-150"
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-[420px] mx-auto bg-[#FAF8F5] rounded-t-3xl border-t border-cream-divider px-6 pt-3 flex flex-col gap-3 animate-sheet-up"
+              style={{
+                paddingBottom: 'calc(max(var(--tg-content-bottom, 0px), var(--tg-safe-bottom, 0px), env(safe-area-inset-bottom, 0px)) + 18px)',
+              }}
+            >
+              <div className="w-10 h-1 rounded-full bg-cream-divider self-center shrink-0 mb-1" />
+
+              <div className="flex items-center justify-between pb-1">
+                <span className="text-xs font-semibold uppercase tracking-wider text-warm-text">
+                  {t('export_modal_title')}
+                </span>
+                <button
+                  type="button"
+                  disabled={isExporting}
+                  onClick={() => setShowExportModal(false)}
+                  className="w-6 h-6 flex items-center justify-center rounded-full text-warm-muted hover:text-warm-text disabled:opacity-30"
+                >
+                  <span className="material-symbols-outlined text-[16px]">close</span>
+                </button>
+              </div>
+
+              <div className="flex flex-col gap-1 max-h-[38vh] overflow-y-auto no-scrollbar">
+                <label className="flex items-center justify-between py-2 px-2.5 rounded-xl bg-cream-surface/50 border border-cream-divider/50 cursor-pointer select-none">
+                  <div className="flex items-center gap-2">
+                    <span className="material-symbols-outlined text-[16px] text-warm-accent">send</span>
+                    <span className="text-xs font-medium text-warm-text">{t('export_private_chat')}</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    disabled={isExporting}
+                    checked={sendToUserChat}
+                    onChange={(e) => setSendToUserChat(e.target.checked)}
+                    className="w-4 h-4 accent-warm-accent rounded"
+                  />
+                </label>
+
+                <div className="pt-2 pb-1">
+                  <span className="text-[10px] font-semibold text-warm-muted uppercase tracking-wider">
+                    {t('export_select_channels')}
+                  </span>
+                </div>
+
+                {(!channels || channels.length === 0) ? (
+                  <div className="p-3 text-center text-[11px] text-warm-subtle italic bg-cream-surface/30 rounded-xl">
+                    {t('no_channels_hint')}
+                  </div>
+                ) : (
+                  channels.map((ch) => {
+                    const isChecked = selectedExportChannels.includes(ch.id);
+                    return (
+                      <label
+                        key={ch.id}
+                        className={`flex items-center justify-between py-2 px-2.5 rounded-xl border transition-colors cursor-pointer select-none ${
+                          isChecked
+                            ? 'bg-cream-surface border-warm-accent/40'
+                            : 'bg-transparent border-cream-divider/40'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0 pr-2">
+                          <span className="material-symbols-outlined text-[16px] text-warm-accent">tag</span>
+                          <span className="text-xs font-medium text-warm-text truncate">{ch.title}</span>
+                        </div>
+                        <input
+                          type="checkbox"
+                          disabled={isExporting}
+                          checked={isChecked}
+                          onChange={() => toggleChannelSelection(ch.id)}
+                          className="w-4 h-4 accent-warm-accent rounded shrink-0"
+                        />
+                      </label>
+                    );
+                  })
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-cream-divider/50">
+                <button
+                  type="button"
+                  disabled={isExporting}
+                  onClick={() => setShowExportModal(false)}
+                  className="px-3.5 py-1.5 rounded-full text-xs font-medium text-warm-muted bg-cream-surface active:scale-95 transition-transform disabled:opacity-30"
+                >
+                  {t('deselect_all')}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExport}
+                  disabled={isExporting || (!sendToUserChat && selectedExportChannels.length === 0)}
+                  className="px-4 py-1.5 rounded-full text-xs font-semibold text-[#FAF8F5] bg-warm-accent active:scale-95 transition-all disabled:opacity-30 flex items-center gap-1.5"
+                >
+                  {isExporting ? (
+                    <>
+                      <div className="w-3 h-3 rounded-full border-[1.5px] border-white/20 border-t-white animate-spin" />
+                      <span>{t('exporting')}</span>
+                    </>
+                  ) : (
+                    <span>{selectedExportChannels.length > 0 ? t('export_with_ad') : t('export_rich')}</span>
+                  )}
+                </button>
+              </div>
             </div>
           </div>,
           document.body

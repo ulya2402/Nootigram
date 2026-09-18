@@ -182,6 +182,7 @@ export class TelegramService {
 
   async sendRichMessage(chatId: number | string, richMessage: InputRichMessage): Promise<TelegramSendResult> {
     const richHtml = this.buildRichHtml(richMessage);
+    console.log(`[TELEGRAM] Calling sendRichMessage endpoint for chatId=${chatId}, htmlLength=${richHtml.length}`);
     try {
       const response = await fetch(`${this.baseUrl}/sendRichMessage`, {
         method: 'POST',
@@ -195,22 +196,23 @@ export class TelegramService {
       });
       const data = (await response.json()) as { ok: boolean; error_code?: number; description?: string };
       if (data.ok) {
+        console.log(`[TELEGRAM] sendRichMessage success for chatId=${chatId}`);
         return { ok: true };
       }
+      console.warn(`[TELEGRAM] sendRichMessage failed (code=${data.error_code}, desc=${data.description}), falling back to html sendMessage`);
       if (data.error_code === 403) {
-        console.error(`TELEGRAM_PERMISSION_DENIED: User ${chatId} has not initiated conversation with bot`);
         return { ok: false, errorCode: 403, description: data.description };
       }
-      console.error(`TELEGRAM_RICH_MESSAGE_FAILED: ${data.description}, falling back to html sendMessage`);
       return this.sendFallbackHtml(chatId, richHtml);
     } catch (error) {
-      console.error(`TELEGRAM_RICH_MESSAGE_EXCEPTION: ${(error as Error).message}`);
+      console.error(`[TELEGRAM] sendRichMessage network exception: ${(error as Error).message}`);
       return this.sendFallbackHtml(chatId, richHtml);
     }
   }
 
   private async sendFallbackHtml(chatId: number | string, html: string): Promise<TelegramSendResult> {
     const adaptedHtml = html
+      .replace(/<cite>(.*?)<\/cite>/gi, '<i> — $1</i>')
       .replace(/<table[^>]*>([\s\S]*?)<\/table>/gi, (_, content) => {
         const rows = content.match(/<tr[^>]*>([\s\S]*?)<\/tr>/gi) || [];
         const lines = rows.map((r: string) => {
@@ -222,15 +224,15 @@ export class TelegramService {
       .replace(/<details><summary>(.*?)<\/summary>([\s\S]*?)<\/details>/gi, '<b>$1</b>\n<blockquote>$2</blockquote>\n\n')
       .replace(/<aside>(.*?)<\/aside>/gi, '<blockquote>$1</blockquote>\n\n')
       .replace(/<tg-math-block>(.*?)<\/tg-math-block>/gi, '<pre><code>$1</code></pre>\n\n')
-      .replace(/<hr\s*[\/]?>/gi, '— — —\n\n')
+      .replace(/<hr\s*[\/]?>/gi, ' \n\n')
       .replace(/<tg-collage>([\s\S]*?)<\/tg-collage>/gi, '$1\n\n')
       .replace(/<tg-slideshow>([\s\S]*?)<\/tg-slideshow>/gi, '$1\n\n')
       .replace(/<figure>([\s\S]*?)<\/figure>/gi, '$1\n\n')
       .replace(/<figcaption>(.*?)<\/figcaption>/gi, '<i>$1</i>\n')
       .replace(/<img[^>]*src="([^"]*)"[^>]*>/gi, '<a href="$1">&#128444; Photo</a>\n')
-      .replace(/<li><input type="checkbox" checked>(.*?)<\/li>/gi, '☑ $1\n')
-      .replace(/<li><input type="checkbox">(.*?)<\/li>/gi, '☐ $1\n')
-      .replace(/<li>(.*?)<\/li>/gi, '• $1\n')
+      .replace(/<li><input type="checkbox" checked>(.*?)<\/li>/gi, '  $1\n')
+      .replace(/<li><input type="checkbox">(.*?)<\/li>/gi, '  $1\n')
+      .replace(/<li>(.*?)<\/li>/gi, '  $1\n')
       .replace(/<ul[^>]*>|<\/ul>|<ol[^>]*>|<\/ol>/gi, '')
       .replace(/<h[1-6]>(.*?)<\/h[1-6]>/gi, '<b>$1</b>\n\n')
       .replace(/<p>(.*?)<\/p>/gi, '$1\n\n')

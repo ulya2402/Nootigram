@@ -179,9 +179,46 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
     }
   }
 
+  if (request.method === 'GET' && path === '/api/channels') {
+    try {
+      const rows = await env.DB.prepare('SELECT id, title, username, photo_url FROM channels WHERE telegram_id = ? ORDER BY created_at ASC')
+        .bind(userId)
+        .all();
+      const botUsername = await telegram.getBotUsername();
+      return new Response(
+        JSON.stringify({ channels: rows.results, bot_username: botUsername }),
+        { headers: { 'Content-Type': 'application/json' } }
+      );
+    } catch (error) {
+      console.error(`API_GET_CHANNELS_ERROR: ${(error as Error).message}`);
+      return new Response(JSON.stringify({ error: 'INTERNAL_SERVER_ERROR' }), { status: 500 });
+    }
+  }
+
+  if (request.method === 'POST' && path === '/api/channels/delete') {
+    try {
+      const body = (await request.json()) as { id: string };
+      await env.DB.prepare('DELETE FROM channels WHERE id = ? AND telegram_id = ?')
+        .bind(body.id, userId)
+        .run();
+      console.log(`CHANNEL_DELETED_SUCCESS: channel=${body.id}, user=${userId}`);
+      return new Response(JSON.stringify({ success: true }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    } catch (error) {
+      console.error(`API_DELETE_CHANNEL_ERROR: ${(error as Error).message}`);
+      return new Response(JSON.stringify({ error: 'DELETE_FAILED' }), { status: 500 });
+    }
+  }
+
   if (request.method === 'POST' && path === '/api/notes/export') {
     try {
-      const payload = (await request.json()) as { note_id: string; note?: NotePayload };
+      const payload = (await request.json()) as {
+        note_id: string;
+        note?: NotePayload;
+        target_channel_ids?: string[];
+        send_to_user?: boolean;
+      };
       let blocks: any[] = [];
       if (payload.note && payload.note.blocks) {
         blocks = payload.note.blocks;
@@ -194,19 +231,48 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
         }
         blocks = JSON.parse(row.blocks_json as string);
       }
-      const sendResult = await telegram.sendRichMessage(userId, { blocks });
-      if (!sendResult.ok && sendResult.errorCode === 403) {
-        const botUsername = await telegram.getBotUsername();
-        return new Response(JSON.stringify({ success: false, error: 'NEED_START_BOT', bot_username: botUsername }), {
-          headers: { 'Content-Type': 'application/json' },
-        });
+
+      let userSuccess = true;
+      if (payload.send_to_user !== false) {
+        const userResult = await telegram.sendRichMessage(userId, { blocks });
+        if (!userResult.ok && userResult.errorCode === 403) {
+          const botUsername = await telegram.getBotUsername();
+          return new Response(JSON.stringify({ success: false, error: 'NEED_START_BOT', bot_username: botUsername }), {
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        userSuccess = userResult.ok;
       }
 
-      return new Response(JSON.stringify({ success: sendResult.ok }), {
+      console.log(`[EXPORT] Received request: userId=${userId}, note_id=${payload.note_id}, target_channel_ids=${JSON.stringify(payload.target_channel_ids)}, send_to_user=${payload.send_to_user}`);
+
+      const channelIds = Array.isArray(payload.target_channel_ids) ? payload.target_channel_ids : [];
+      let channelSuccessCount = 0;
+
+      for (const chId of channelIds) {
+        console.log(`[EXPORT] Checking channel authorization: chId=${chId}, userId=${userId}`);
+        const verifyRow = await env.DB.prepare('SELECT id FROM channels WHERE (id = ? OR id = ?) AND telegram_id = ?')
+          .bind(chId, chId.replace(/^-100/, '-'), userId)
+          .first();
+
+        if (verifyRow) {
+          const normalizedTarget = chId.startsWith('-100') ? chId : chId.startsWith('-') ? `-100${chId.slice(1)}` : `-100${chId}`;
+          console.log(`[EXPORT] Authorized channel found. Sending message to ${normalizedTarget}`);
+          const chResult = await telegram.sendRichMessage(normalizedTarget, { blocks });
+          console.log(`[EXPORT] Channel send result: target=${normalizedTarget}, ok=${chResult.ok}, code=${chResult.errorCode}, desc=${chResult.description}`);
+          if (chResult.ok) channelSuccessCount++;
+        } else {
+          console.warn(`[EXPORT] Channel not found or unauthorized: chId=${chId}, userId=${userId}`);
+        }
+      }
+
+      const isOverallSuccess = channelIds.length > 0 ? channelSuccessCount > 0 : userSuccess;
+      console.log(`[EXPORT] Completed: isOverallSuccess=${isOverallSuccess}, channelSuccessCount=${channelSuccessCount}`);
+      return new Response(JSON.stringify({ success: isOverallSuccess, channels_posted: channelSuccessCount }), {
         headers: { 'Content-Type': 'application/json' },
       });
     } catch (error) {
-      console.error(`API_EXPORT_NOTE_ERROR: ${(error as Error).message}`);
+      console.error(`[EXPORT] Exception occurred: ${(error as Error).message}`);
       return new Response(JSON.stringify({ error: 'EXPORT_FAILED' }), { status: 500 });
     }
   }

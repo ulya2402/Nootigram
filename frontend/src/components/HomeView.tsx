@@ -11,6 +11,7 @@ interface HomeViewProps {
   onToggleFavorite: (id: string, e: React.MouseEvent) => void;
   onDeleteNote: (id: string) => void;
   onBatchDeleteNotes: (ids: string[]) => void;
+  onOpenChannels?: () => void;
 }
 
 function extractSnippet(note: NoteItem): string {
@@ -43,6 +44,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
   onToggleFavorite,
   onDeleteNote,
   onBatchDeleteNotes,
+  onOpenChannels,
 }) => {
   const [selectedFilter, setSelectedFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');

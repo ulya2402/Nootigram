@@ -22,6 +22,21 @@ export interface MediaImageItem {
   delete_url?: string;
 }
 
+export interface ChannelItem {
+  id: string;
+  title: string;
+  username?: string;
+  photo_url?: string;
+}
+
+declare global {
+  interface Window {
+    Telegram?: {
+      WebApp: TelegramWebApp;
+    };
+  }
+}
+
 export type ContentBlock =
   | { id: string; type: 'paragraph'; text: string }
   | { id: string; type: 'heading'; size: 1 | 2 | 3 | 4 | 5 | 6; text: string }
@@ -83,6 +98,7 @@ export interface TelegramWebApp {
   onEvent: (eventType: string, eventHandler: () => void) => void;
   offEvent: (eventType: string, eventHandler: () => void) => void;
   openTelegramLink: (url: string) => void;
+  openLink?: (url: string, options?: { try_instant_view?: boolean }) => void;
   requestWriteAccess: (callback?: (allowed: boolean) => void) => void;
   BackButton: {
     isVisible: boolean;

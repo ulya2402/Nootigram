@@ -3,8 +3,9 @@ import { HomeView } from './components/HomeView';
 import { NotebooksView } from './components/NotebooksView';
 import { FavoritesView } from './components/FavoritesView';
 import { EditorView } from './components/EditorView';
-import { NoteItem, TopicItem } from './types';
-import { fetchBootstrap, syncNotesBatch, deleteNoteApi, deleteNotesBatchApi, createTopicApi, deleteTopicApi } from './services/api';
+import { ChannelsView } from './components/ChannelsView';
+import { NoteItem, TopicItem, ChannelItem } from './types';
+import { fetchBootstrap, syncNotesBatch, deleteNoteApi, deleteNotesBatchApi, createTopicApi, deleteTopicApi, fetchChannels } from './services/api';
 import { setLanguage, t, subscribeLanguage } from './services/i18n';
 import { deleteFromImgbb } from './services/imgbb';
 
@@ -27,9 +28,33 @@ const getStorageKey = (prefix: string): string => {
 };
 
 export const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'notes' | 'notebooks' | 'favorites'>('notes');
+  const [activeTab, setActiveTab] = useState<'notes' | 'notebooks' | 'favorites' | 'channels'>('notes');
   const [activeView, setActiveView] = useState<'list' | 'editor'>('list');
   const [activeNote, setActiveNote] = useState<NoteItem | null>(null);
+  const [channels, setChannels] = useState<ChannelItem[]>([]);
+  const [botUsername, setBotUsername] = useState<string>('');
+
+  const refreshChannels = useCallback(async () => {
+    const res = await fetchChannels();
+    if (res.channels) setChannels(res.channels);
+    if (res.bot_username) setBotUsername(res.bot_username);
+    return res.channels || [];
+  }, []);
+
+  useEffect(() => {
+    refreshChannels();
+    const handleRecheck = () => {
+      if (document.visibilityState === 'visible') {
+        refreshChannels();
+      }
+    };
+    document.addEventListener('visibilitychange', handleRecheck);
+    window.addEventListener('focus', handleRecheck);
+    return () => {
+      document.removeEventListener('visibilitychange', handleRecheck);
+      window.removeEventListener('focus', handleRecheck);
+    };
+  }, [refreshChannels]);
   const [, setCurrentLang] = useState<string>(() => localStorage.getItem('notigram_lang') || 'en');
 
   useEffect(() => {
@@ -285,13 +310,37 @@ export const App: React.FC = () => {
       {activeView === 'list' && (
         <header className="safe-header-box bg-[#FAF8F5] border-b border-cream-divider/60 max-w-[420px] w-full mx-auto shrink-0 z-20">
           <div className="px-6 pb-2 flex items-center justify-between">
-            <h1 className="text-sm font-semibold tracking-tight text-warm-text">
-              {activeTab === 'notes'
-                ? t('notes_title')
-                : activeTab === 'notebooks'
-                ? t('notebooks_title')
-                : t('favorites_title')}
-            </h1>
+            {activeTab === 'notes' || activeTab === 'channels' ? (
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => {
+                    triggerHaptic('light');
+                    setActiveTab('notes');
+                  }}
+                  className={`text-sm tracking-tight transition-colors ${
+                    activeTab === 'notes' ? 'font-semibold text-warm-text' : 'font-normal text-warm-muted hover:text-warm-text'
+                  }`}
+                >
+                  {t('notes_title')}
+                </button>
+                <span className="text-xs text-cream-divider">/</span>
+                <button
+                  onClick={() => {
+                    triggerHaptic('light');
+                    setActiveTab('channels');
+                  }}
+                  className={`text-sm tracking-tight transition-colors ${
+                    activeTab === 'channels' ? 'font-semibold text-warm-text' : 'font-normal text-warm-muted hover:text-warm-text'
+                  }`}
+                >
+                  {t('my_channel')}
+                </button>
+              </div>
+            ) : (
+              <h1 className="text-sm font-semibold tracking-tight text-warm-text">
+                {activeTab === 'notebooks' ? t('notebooks_title') : t('favorites_title')}
+              </h1>
+            )}
             <div className="w-7 h-7 rounded-full bg-cream-surface text-warm-text font-semibold text-xs flex items-center justify-center border border-cream-divider overflow-hidden">
               {userPhoto ? (
                 <img src={userPhoto} alt={userName} className="w-full h-full object-cover" />
@@ -307,6 +356,7 @@ export const App: React.FC = () => {
           <EditorView
             note={activeNote}
             topics={topics}
+            channels={channels}
             onBack={() => {
               flushPendingSync();
               triggerHaptic();
@@ -326,6 +376,7 @@ export const App: React.FC = () => {
                 onToggleFavorite={handleToggleFavorite}
                 onDeleteNote={handleDeleteNote}
                 onBatchDeleteNotes={handleBatchDeleteNotes}
+                onOpenChannels={() => setActiveTab('channels')}
               />
             )}
             {activeTab === 'notebooks' && (
@@ -343,6 +394,15 @@ export const App: React.FC = () => {
                 topics={topics}
                 onOpenNote={handleOpenNote}
                 onToggleFavorite={handleToggleFavorite}
+              />
+            )}
+            {activeTab === 'channels' && (
+              <ChannelsView
+                channels={channels}
+                botUsername={botUsername}
+                onRefresh={refreshChannels}
+                onChannelsUpdated={setChannels}
+                onBack={() => setActiveTab('notes')}
               />
             )}
           </>

@@ -143,6 +143,22 @@ code {
   animation: spinLoader 0.75s linear infinite;
 }
 
+@keyframes sheetSlideUp {
+  from {
+    transform: translate3d(0, 100%, 0);
+    opacity: 0.9;
+  }
+  to {
+    transform: translate3d(0, 0, 0);
+    opacity: 1;
+  }
+}
+
+.animate-sheet-up {
+  animation: sheetSlideUp 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: transform;
+}
+
 textarea {
   field-sizing: content;
 }

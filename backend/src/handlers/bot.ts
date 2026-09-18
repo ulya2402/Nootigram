@@ -96,9 +96,50 @@ export async function handleBotUpdate(update: TelegramUpdate, env: Env): Promise
         return new Response('OK', { status: 200 });
       }
     }
+
+    if (update.my_chat_member) {
+      const mcm = update.my_chat_member;
+      const chat = mcm.chat;
+      const user = mcm.from;
+      const isChannel = chat.type === 'channel';
+      const isPromoted = mcm.new_chat_member.status === 'administrator';
+      const isDemoted = ['left', 'kicked', 'member'].includes(mcm.new_chat_member.status);
+
+      if (isChannel && isPromoted) {
+        const countRow = await env.DB.prepare('SELECT COUNT(*) as total FROM channels WHERE telegram_id = ?')
+          .bind(user.id)
+          .first<{ total: number }>();
+
+        const currentTotal = countRow?.total || 0;
+        if (currentTotal < 5) {
+          const rawId = String(chat.id);
+          const channelIdStr = rawId.startsWith('-100') ? rawId : rawId.startsWith('-') ? `-100${rawId.slice(1)}` : `-100${rawId}`;
+          const photoUrl = chat.username ? `https://t.me/i/userpic/320/${chat.username}.jpg` : null;
+
+          await env.DB.prepare(`
+            INSERT INTO channels (id, telegram_id, title, username, photo_url)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              title = excluded.title,
+              username = excluded.username,
+              photo_url = excluded.photo_url
+          `)
+            .bind(channelIdStr, user.id, chat.title || 'Untitled Channel', chat.username || null, photoUrl)
+            .run();
+          console.log(`CHANNEL_LINKED_SUCCESS: channel=${channelIdStr}, user=${user.id}`);
+        } else {
+          console.warn(`CHANNEL_LIMIT_REACHED: user=${user.id}`);
+        }
+      } else if (isChannel && isDemoted) {
+        await env.DB.prepare('DELETE FROM channels WHERE id = ? AND telegram_id = ?')
+          .bind(String(chat.id), user.id)
+          .run();
+        console.log(`CHANNEL_UNLINKED: channel=${chat.id}, user=${user.id}`);
+      }
+      return new Response('OK', { status: 200 });
+    }
   } catch (error) {
     console.error(`BOT_HANDLER_ERROR: ${(error as Error).message}`);
   }
-
   return new Response('OK', { status: 200 });
 }
