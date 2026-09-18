@@ -60,7 +60,10 @@ export class TelegramService {
 
   private formatInlineHtml(raw: string): string {
     if (!raw) return '';
-    return raw
+    let formatted = raw
+      .replace(/<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/gi, '$1')
+      .replace(/<h[1-6][^>]*>/gi, '')
+      .replace(/<\/h[1-6]>/gi, '')
       .replace(/<div><br\s*[\/]?>\s*<\/div>/gi, '<br>')
       .replace(/<div>/gi, '<br>')
       .replace(/<\/div>/gi, '')
@@ -80,8 +83,37 @@ export class TelegramService {
       .replace(/<\/strike>/gi, '</s>')
       .replace(/<span[^>]*>/gi, '')
       .replace(/<\/span>/gi, '')
-      .replace(/(<br>\s*)+$/gi, '')
+      .replace(/(?:<br\s*[\/]?>\s*){3,}/gi, '<br><br>')
+      .replace(/(<br\s*[\/]?>\s*)+$/gi, '')
+      .replace(/^(<br\s*[\/]?>\s*)+/gi, '')
       .trim();
+
+    const testClean = formatted.trim();
+    if (/^<b>[\s\S]*<\/b>$/i.test(testClean) && testClean.length > 80) {
+      const inner = testClean.replace(/^<b>/i, '').replace(/<\/b>$/i, '').trim();
+      if (!inner.includes('<b>') && !inner.includes('</b>')) {
+        formatted = inner;
+      }
+    }
+
+    const tags = ['b', 'i', 'u', 's', 'code', 'tg-spoiler'];
+    for (const tag of tags) {
+      const openCount = (formatted.match(new RegExp(`<${tag}(?:\\s[^>]*)?>`, 'gi')) || []).length;
+      const closeCount = (formatted.match(new RegExp(`</${tag}>`, 'gi')) || []).length;
+      if (openCount > closeCount) {
+        formatted += `</${tag}>`.repeat(openCount - closeCount);
+      } else if (closeCount > openCount) {
+        let excess = closeCount - openCount;
+        formatted = formatted.replace(new RegExp(`</${tag}>`, 'gi'), (match) => {
+          if (excess > 0) {
+            excess--;
+            return '';
+          }
+          return match;
+        });
+      }
+    }
+    return formatted;
   }
 
   private buildRichHtml(richMessage: InputRichMessage): string {
@@ -92,10 +124,10 @@ export class TelegramService {
       if (b.type === 'heading') {
         const size = b.size || 2;
         const text = this.formatInlineHtml(b.text);
-        if (text) html += `<h${size}>${text}</h${size}>\n\n`;
+        if (text) html += `<h${size}>${text}</h${size}>\n`;
       } else if (b.type === 'paragraph') {
         const text = this.formatInlineHtml(b.text);
-        if (text) html += `<p>${text}</p>\n\n`;
+        if (text) html += `<p>${text}</p>\n`;
       } else if (b.type === 'blockquote') {
         const quoteText = b.blocks && b.blocks[0] && 'text' in b.blocks[0] ? (b.blocks[0] as any).text : '';
         const text = this.formatInlineHtml(quoteText);
@@ -234,9 +266,10 @@ export class TelegramService {
       .replace(/<li><input type="checkbox">(.*?)<\/li>/gi, '  $1\n')
       .replace(/<li>(.*?)<\/li>/gi, '  $1\n')
       .replace(/<ul[^>]*>|<\/ul>|<ol[^>]*>|<\/ol>/gi, '')
-      .replace(/<h[1-6]>(.*?)<\/h[1-6]>/gi, '<b>$1</b>\n\n')
-      .replace(/<p>(.*?)<\/p>/gi, '$1\n\n')
-      .trim();
+        .replace(/<h[1-6]>([\s\S]*?)<\/h[1-6]>/gi, '<b>$1</b>\n\n')
+        .replace(/<p>([\s\S]*?)<\/p>/gi, '$1\n\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
     const finalHtml = adaptedHtml || 'Empty note';
     const res = await this.sendMessage(chatId, finalHtml, undefined, 'HTML');
     if (!res.ok && res.errorCode === 400) {

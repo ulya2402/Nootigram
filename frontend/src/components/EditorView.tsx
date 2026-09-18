@@ -78,6 +78,13 @@ const EditableBlock: React.FC<{
       divRef.current.innerHTML = html || '';
     }
   }, [html]);
+
+  const handlePaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const text = e.clipboardData.getData('text/plain');
+    document.execCommand('insertText', false, text);
+  };
+
   return (
     <div
       ref={divRef}
@@ -89,6 +96,7 @@ const EditableBlock: React.FC<{
         onChange(e.currentTarget.innerHTML);
       }}
       onKeyDown={onKeyDown}
+      onPaste={handlePaste}
       className={className}
     />
   );
@@ -1184,10 +1192,16 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
     triggerHaptic('medium');
     setIsExporting(true);
     const richBlocks: any[] = [];
-    if (currentNote.title.trim()) {
-      richBlocks.push({ type: 'heading', size: 1, text: currentNote.title });
+    const cleanTitle = currentNote.title.trim();
+    if (cleanTitle) {
+      const titleLines = cleanTitle.split('\n').map((l) => l.trim()).filter(Boolean);
+      if (titleLines.length > 0) {
+        richBlocks.push({ type: 'heading', size: 1, text: titleLines[0] });
+        for (let i = 1; i < titleLines.length; i++) {
+          richBlocks.push({ type: 'paragraph', text: titleLines[i] });
+        }
+      }
     }
-
     currentNote.blocks.forEach((b) => {
       if (b.type === 'heading') {
         richBlocks.push({ type: 'heading', size: b.size, text: b.text });
@@ -1583,11 +1597,23 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
           placeholder={t('title_placeholder')}
           onFocus={() => setFocusedBlockIndex(null)}
           onInput={(e) => autoResize(e.currentTarget)}
-          onChange={(e) => handleTitleChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              triggerHaptic('light');
+              const firstBlock = currentNote.blocks[0];
+              if (firstBlock) {
+                const el = blockElementRefs.current[firstBlock.id];
+                const editable = el?.querySelector<HTMLElement>('[contenteditable="true"], input, textarea');
+                editable?.focus();
+              }
+            }
+          }}
+          onChange={(e) => handleTitleChange(e.target.value.replace(/\r?\n/g, ' '))}
           className="text-2xl font-bold tracking-tight text-warm-text bg-transparent border-none focus:outline-none placeholder:text-warm-subtle w-full mb-3 resize-none overflow-hidden"
         />
 
-        <div className="flex flex-col gap-2.5 min-h-[300px] w-full min-w-0">
+        <div className="flex flex-col gap-1.5 min-h-[300px] w-full min-w-0">
           {currentNote.blocks.map((block, index) => (
             <div
               key={block.id}
