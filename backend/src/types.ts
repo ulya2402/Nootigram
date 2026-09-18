@@ -43,6 +43,17 @@ export type InputRichBlock =
        type: 'document';
        url: string;
        caption?: string;
+     }
+  | {
+       type: 'button_row';
+       align?: 'left' | 'center' | 'right';
+       buttons: {
+         text: string;
+         style?: 'primary' | 'success' | 'danger' | 'link';
+         type: 'url' | 'copy_text';
+         url?: string;
+         copy_text?: string;
+       }[];
      };
 
 export interface InputRichMessage {

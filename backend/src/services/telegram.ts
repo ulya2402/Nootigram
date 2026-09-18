@@ -252,6 +252,22 @@ export class TelegramService {
         } else {
           html += `<tg-document src="${safeUrl}"></tg-document>\n\n`;
         }
+      } else if (b.type === 'button_row' && Array.isArray(b.buttons) && b.buttons.length > 0) {
+        const alignAttr = b.align ? ` align="${b.align}"` : '';
+        let rowHtml = `<tg-button-row${alignAttr}>\n`;
+        for (const btn of b.buttons) {
+          const styleAttr = btn.style ? ` style="${btn.style}"` : '';
+          const btnText = this.escapeText(btn.text || 'Button');
+          if (btn.type === 'copy_text') {
+            const copyAttr = ` text="${this.escapeText(btn.copy_text || '')}"`;
+            rowHtml += `  <tg-button type="copy_text"${styleAttr}${copyAttr}>${btnText}</tg-button>\n`;
+          } else {
+            const urlAttr = ` url="${this.escapeText(btn.url || 'https://t.me')}"`;
+            rowHtml += `  <tg-button type="url"${styleAttr}${urlAttr}>${btnText}</tg-button>\n`;
+          }
+        }
+        rowHtml += `</tg-button-row>\n\n`;
+        html += rowHtml;
       }
     }
     return html.trim();
@@ -309,6 +325,9 @@ export class TelegramService {
       .replace(/<img[^>]*src="([^"]*)"[^>]*>/gi, '<a href="$1">&#128444; Photo</a>\n')
       .replace(/<audio[^>]*src="([^"]*)"[^>]*><\/audio>/gi, '<a href="$1">&#127925; Audio</a>\n')
       .replace(/<tg-document[^>]*src="([^"]*)"[^>]*><\/tg-document>/gi, '<a href="$1">&#128206; Document</a>\n')
+      .replace(/<tg-button-row[^>]*>([\s\S]*?)<\/tg-button-row>/gi, '$1\n')
+      .replace(/<tg-button[^>]*type="url"[^>]*url="([^"]*)"[^>]*>([\s\S]*?)<\/tg-button>/gi, '<a href="$1">&#128279; $2</a> ')
+      .replace(/<tg-button[^>]*type="copy_text"[^>]*text="([^"]*)"[^>]*>([\s\S]*?)<\/tg-button>/gi, '&#128203; <b>$2:</b> <code>$1</code> ')
       .replace(/<li><input type="checkbox" checked>(.*?)<\/li>/gi, '  $1\n')
       .replace(/<li><input type="checkbox">(.*?)<\/li>/gi, '  $1\n')
       .replace(/<li>(.*?)<\/li>/gi, '  $1\n')

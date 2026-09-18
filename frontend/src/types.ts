@@ -79,6 +79,18 @@ export type ContentBlock =
       name: string;
       size?: number;
       caption?: string;
+    }
+  | {
+      id: string;
+      type: 'button_row';
+      align: 'left' | 'center' | 'right';
+      buttons: {
+        id: string;
+        text: string;
+        style: 'default' | 'primary' | 'success' | 'danger';
+        type: 'url' | 'copy_text';
+        value: string;
+      }[];
     };
 
 export interface NoteItem {

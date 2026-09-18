@@ -159,6 +159,30 @@ code {
   will-change: transform;
 }
 
+@keyframes btnJiggleA {
+  0% { transform: rotate(0deg); }
+  25% { transform: rotate(-1.4deg) translate3d(-0.5px, 0, 0); }
+  75% { transform: rotate(1.4deg) translate3d(0.5px, 0, 0); }
+  100% { transform: rotate(0deg); }
+}
+
+@keyframes btnJiggleB {
+  0% { transform: rotate(0deg); }
+  25% { transform: rotate(1.4deg) translate3d(0.5px, 0, 0); }
+  75% { transform: rotate(-1.4deg) translate3d(-0.5px, 0, 0); }
+  100% { transform: rotate(0deg); }
+}
+
+.animate-jiggle-a {
+  animation: btnJiggleA 0.18s ease-in-out infinite alternate;
+  will-change: transform;
+}
+
+.animate-jiggle-b {
+  animation: btnJiggleB 0.21s ease-in-out infinite alternate;
+  will-change: transform;
+}
+
 textarea {
   field-sizing: content;
 }

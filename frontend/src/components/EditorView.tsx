@@ -156,6 +156,22 @@ export const EditorView: React.FC<EditorViewProps> = ({
       if (b.type === 'pre') {
         return { id, type: 'code', text: b.text || '', language: b.language || 'javascript' };
       }
+      if (b.type === 'button_row') {
+        return {
+          id,
+          type: 'button_row',
+          align: b.align || 'center',
+          buttons: Array.isArray(b.buttons)
+            ? b.buttons.map((btn: any, bIdx: number) => ({
+                id: btn.id || `btn-${Date.now()}-${bIdx}`,
+                text: btn.text || 'Button',
+                style: btn.style || 'default',
+                type: btn.type || 'url',
+                value: btn.value || btn.url || btn.copy_text || '',
+              }))
+            : [],
+        };
+      }
       if (b.type === 'list') {
         const hasTaskStyle = b.style === 'task' || (!b.style && b.items?.some((i: any) => i.has_checkbox || i.is_checked !== undefined));
         const resolvedStyle = hasTaskStyle ? 'task' : (b.style || 'bullet');
@@ -184,6 +200,15 @@ export const EditorView: React.FC<EditorViewProps> = ({
   const [activeSlideIndices, setActiveSlideIndices] = useState<Record<string, number>>({});
   const [openDetailsMap, setOpenDetailsMap] = useState<Record<string, boolean>>({});
   const [isUploadingGlobal, setIsUploadingGlobal] = useState<boolean>(false);
+  const [editingButtonModal, setEditingButtonModal] = useState<{
+    blockIndex: number;
+    buttonIndex: number;
+    id: string;
+    text: string;
+    style: 'default' | 'primary' | 'success' | 'danger';
+    type: 'url' | 'copy_text';
+    value: string;
+  } | null>(null);
 
   const toggleDetails = (blockId: string) => {
     triggerHaptic('light');
@@ -572,17 +597,23 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
 
     const handleFocusIn = (e: FocusEvent) => {
       const target = e.target as HTMLElement | null;
+      if (target?.closest('[data-modal="true"]')) {
+        setIsEditorActive(false);
+        return;
+      }
       if (target?.closest('[contenteditable="true"]') || target?.tagName === 'TEXTAREA' || target?.tagName === 'INPUT') {
         setIsEditorActive(true);
       }
     };
-
     const handleFocusOut = (e: FocusEvent) => {
       const related = e.relatedTarget as HTMLElement | null;
       if (!related?.closest('[data-format-bar="true"]')) {
         setTimeout(() => {
           const active = document.activeElement as HTMLElement | null;
-          if (!active?.closest('[contenteditable="true"]') && active?.tagName !== 'TEXTAREA' && active?.tagName !== 'INPUT') {
+          if (
+            (!active?.closest('[contenteditable="true"]') && active?.tagName !== 'TEXTAREA' && active?.tagName !== 'INPUT') ||
+            active?.closest('[data-modal="true"]')
+          ) {
             setIsEditorActive(false);
           }
         }, 120);
@@ -1123,6 +1154,22 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
       case 'divider':
         primaryBlock = { id: bId1, type: 'divider' };
         break;
+      case 'button_row':
+        primaryBlock = {
+          id: bId1,
+          type: 'button_row',
+          align: 'center',
+          buttons: [
+            {
+              id: `btn-${Date.now()}`,
+              text: t('btn_default_label'),
+              style: 'primary',
+              type: 'url',
+              value: 'https://t.me',
+            },
+          ],
+        };
+        break;
       default:
         primaryBlock = { id: bId1, type: 'paragraph', text: '' };
         break;
@@ -1230,6 +1277,167 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
     const tableBlock = currentNote.blocks[tableIndex];
     if (tableBlock.type !== 'table') return;
     updateBlock(tableIndex, { ...tableBlock, is_compact: !tableBlock.is_compact }, true);
+  };
+
+  const [activeDraggingBtnId, setActiveDraggingBtnId] = useState<string | null>(null);
+  const [activeJiggleRowIndex, setActiveJiggleRowIndex] = useState<number | null>(null);
+  const [dragOffsetX, setDragOffsetX] = useState<number>(0);
+
+  const buttonDragRef = useRef<{
+    blockIndex: number;
+    btnIndex: number;
+    startX: number;
+    startY: number;
+    isDragging: boolean;
+    timer: number | null;
+  } | null>(null);
+
+  const handleBtnTouchStart = (blockIndex: number, btnIndex: number, btnId: string, e: React.TouchEvent) => {
+    const touch = e.touches[0];
+    const timer = window.setTimeout(() => {
+      triggerHaptic('rigid');
+      setActiveDraggingBtnId(btnId);
+      setActiveJiggleRowIndex(blockIndex);
+      if (buttonDragRef.current) {
+        buttonDragRef.current.isDragging = true;
+      }
+    }, 320);
+
+    buttonDragRef.current = {
+      blockIndex,
+      btnIndex,
+      startX: touch.clientX,
+      startY: touch.clientY,
+      isDragging: false,
+      timer,
+    };
+  };
+
+  const handleBtnTouchMove = (blockIndex: number, e: React.TouchEvent) => {
+    if (!buttonDragRef.current) return;
+    const touch = e.touches[0];
+    const diffY = Math.abs(touch.clientY - buttonDragRef.current.startY);
+    const diffX = touch.clientX - buttonDragRef.current.startX;
+
+    if (!buttonDragRef.current.isDragging && diffY > 10) {
+      if (buttonDragRef.current.timer) {
+        clearTimeout(buttonDragRef.current.timer);
+        buttonDragRef.current.timer = null;
+      }
+      return;
+    }
+
+    if (buttonDragRef.current.isDragging) {
+      e.preventDefault();
+      setDragOffsetX(diffX);
+      const currentIdx = buttonDragRef.current.btnIndex;
+      const block = currentNote.blocks[blockIndex];
+      if (block?.type !== 'button_row') return;
+
+      if (diffX > 60 && currentIdx < block.buttons.length - 1) {
+        triggerHaptic('medium');
+        const nextButtons = [...block.buttons];
+        const temp = nextButtons[currentIdx];
+        nextButtons[currentIdx] = nextButtons[currentIdx + 1];
+        nextButtons[currentIdx + 1] = temp;
+        updateBlock(blockIndex, { ...block, buttons: nextButtons }, true);
+        buttonDragRef.current.btnIndex = currentIdx + 1;
+        buttonDragRef.current.startX = touch.clientX;
+        setDragOffsetX(0);
+      } else if (diffX < -60 && currentIdx > 0) {
+        triggerHaptic('medium');
+        const nextButtons = [...block.buttons];
+        const temp = nextButtons[currentIdx];
+        nextButtons[currentIdx] = nextButtons[currentIdx - 1];
+        nextButtons[currentIdx - 1] = temp;
+        updateBlock(blockIndex, { ...block, buttons: nextButtons }, true);
+        buttonDragRef.current.btnIndex = currentIdx - 1;
+        buttonDragRef.current.startX = touch.clientX;
+        setDragOffsetX(0);
+      }
+    }
+  };
+
+  const handleBtnTouchEnd = (e: React.TouchEvent) => {
+    if (buttonDragRef.current?.timer) {
+      clearTimeout(buttonDragRef.current.timer);
+    }
+    const wasDragging = buttonDragRef.current?.isDragging;
+    buttonDragRef.current = null;
+    setActiveDraggingBtnId(null);
+    setActiveJiggleRowIndex(null);
+    setDragOffsetX(0);
+    if (wasDragging) {
+      e.preventDefault();
+      triggerHaptic('light');
+    }
+  };
+
+  const handleOpenButtonConfig = (blockIndex: number, buttonIndex: number, btn: any) => {
+    triggerHaptic('light');
+    setIsEditorActive(false);
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+    setFocusedBlockIndex(blockIndex);
+    setEditingButtonModal({
+      blockIndex,
+      buttonIndex,
+      ...btn,
+    });
+  };
+
+  const setButtonRowAlign = (blockIndex: number, align: 'left' | 'center' | 'right') => {
+    triggerHaptic('light');
+    const block = currentNote.blocks[blockIndex];
+    if (block.type !== 'button_row') return;
+    updateBlock(blockIndex, { ...block, align }, true);
+  };
+
+  const addButtonToRow = (blockIndex: number) => {
+    const block = currentNote.blocks[blockIndex];
+    if (block.type !== 'button_row') return;
+    if (block.buttons.length >= 3) {
+      triggerHaptic('heavy');
+      alert(t('btn_max_reached'));
+      return;
+    }
+    triggerHaptic('medium');
+    const newBtn = {
+      id: `btn-${Date.now()}`,
+      text: t('btn_new_label'),
+      style: 'default' as const,
+      type: 'url' as const,
+      value: 'https://t.me',
+    };
+    updateBlock(blockIndex, { ...block, buttons: [...block.buttons, newBtn] }, true);
+  };
+
+  const saveEditedButton = () => {
+    if (!editingButtonModal) return;
+    triggerHaptic('light');
+    const { blockIndex, buttonIndex, id, text, style, type, value } = editingButtonModal;
+    const block = currentNote.blocks[blockIndex];
+    if (block?.type === 'button_row') {
+      const nextButtons = [...block.buttons];
+      nextButtons[buttonIndex] = { id, text, style, type, value };
+      updateBlock(blockIndex, { ...block, buttons: nextButtons }, true);
+    }
+    setEditingButtonModal(null);
+  };
+
+  const deleteButtonFromRow = (blockIndex: number, buttonIndex: number) => {
+    triggerHaptic('medium');
+    const block = currentNote.blocks[blockIndex];
+    if (block?.type === 'button_row') {
+      const nextButtons = block.buttons.filter((_, idx) => idx !== buttonIndex);
+      if (nextButtons.length === 0) {
+        removeBlock(blockIndex);
+      } else {
+        updateBlock(blockIndex, { ...block, buttons: nextButtons }, true);
+      }
+    }
+    setEditingButtonModal(null);
   };
 
   const setCellAlignment = (blockIndex: number, rowIndex: number, colIndex: number, align: 'left' | 'center' | 'right') => {
@@ -1420,6 +1628,18 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
           type: 'document',
           url: b.url,
           caption: b.caption || '',
+        });
+      } else if (b.type === 'button_row') {
+        richBlocks.push({
+          type: 'button_row',
+          align: b.align || 'center',
+          buttons: b.buttons.map((btn) => ({
+            text: btn.text,
+            style: btn.style === 'default' ? undefined : btn.style,
+            type: btn.type,
+            url: btn.type === 'url' ? btn.value : undefined,
+            copy_text: btn.type === 'copy_text' ? btn.value : undefined,
+          })),
         });
       }
     });
@@ -1745,6 +1965,13 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
               >
                 <span className="material-symbols-outlined text-[14px]">horizontal_rule</span>
                 <span>{t('tool_divider')}</span>
+              </button>
+              <button
+                onClick={() => appendBlockWithParagraph('button_row')}
+                className="px-2.5 py-1 rounded-full bg-cream-surface text-xs font-medium flex items-center gap-1 shrink-0 physics-bounce"
+              >
+                <span className="material-symbols-outlined text-[14px] text-warm-accent">smart_button</span>
+                <span>{t('tool_button')}</span>
               </button>
             </>
           )}
@@ -2597,9 +2824,145 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                     />
                   </div>
                 )}
+                {block.type === 'button_row' && (
+                  <div
+                    onClick={() => setFocusedBlockIndex(index)}
+                    className="flex flex-col gap-1.5 my-2 w-full min-w-0 transition-all select-none"
+                  >
+                    <div
+                      className={`flex items-center justify-between gap-2 overflow-hidden transition-all duration-200 ease-out ${
+                        focusedBlockIndex === index
+                          ? 'max-h-10 opacity-100 py-1'
+                          : 'max-h-0 opacity-0 pointer-events-none py-0'
+                      }`}
+                    >
+                      <div className="flex items-center bg-cream-surface border border-cream-divider rounded-lg p-0.5">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setButtonRowAlign(index, 'left');
+                          }}
+                          className={`w-6 h-6 flex items-center justify-center rounded transition-colors ${
+                            block.align === 'left' ? 'text-warm-accent bg-[#FAF8F5] shadow-xs' : 'text-warm-muted hover:text-warm-text'
+                          }`}
+                        >
+                          <span className="material-symbols-outlined text-[14px]">format_align_left</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setButtonRowAlign(index, 'center');
+                          }}
+                          className={`w-6 h-6 flex items-center justify-center rounded transition-colors ${
+                            block.align === 'center' ? 'text-warm-accent bg-[#FAF8F5] shadow-xs' : 'text-warm-muted hover:text-warm-text'
+                          }`}
+                        >
+                          <span className="material-symbols-outlined text-[14px]">format_align_center</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setButtonRowAlign(index, 'right');
+                          }}
+                          className={`w-6 h-6 flex items-center justify-center rounded transition-colors ${
+                            block.align === 'right' ? 'text-warm-accent bg-[#FAF8F5] shadow-xs' : 'text-warm-muted hover:text-warm-text'
+                          }`}
+                        >
+                          <span className="material-symbols-outlined text-[14px]">format_align_right</span>
+                        </button>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          addButtonToRow(index);
+                        }}
+                        disabled={block.buttons.length >= 3}
+                        className="px-2.5 py-1 rounded-full bg-cream-surface border border-cream-divider text-[11px] font-semibold text-warm-accent disabled:opacity-30 flex items-center gap-1 active:scale-95 transition-transform"
+                      >
+                        <span className="material-symbols-outlined text-[13px]">add</span>
+                        <span>{t('btn_add_to_row')}</span>
+                      </button>
+                    </div>
+                    <div
+                      className={`flex items-center gap-2 py-2 w-full ${
+                        block.buttons.length === 1
+                          ? block.align === 'center'
+                            ? 'justify-center'
+                            : block.align === 'right'
+                            ? 'justify-end'
+                            : 'justify-start'
+                          : 'justify-between'
+                      }`}
+                    >
+                      {block.buttons.map((btn, btnIdx) => {
+                        const styleClass =
+                          btn.style === 'primary'
+                            ? 'bg-[#2AABEE] text-white border-transparent'
+                            : btn.style === 'success'
+                            ? 'bg-[#3E7356] text-white border-transparent'
+                            : btn.style === 'danger'
+                            ? 'bg-[#BA4A38] text-white border-transparent'
+                            : 'bg-[#FAF8F5] text-warm-text border-cream-divider';
+
+                        const isThisDragging = activeDraggingBtnId === btn.id;
+                        const isRowJiggling = activeJiggleRowIndex === index;
+
+                        const jiggleClass =
+                          isRowJiggling && !isThisDragging
+                            ? btnIdx % 2 === 0
+                              ? 'animate-jiggle-a'
+                              : 'animate-jiggle-b'
+                            : '';
+
+                        const dynamicTransform = isThisDragging
+                          ? `translate3d(${dragOffsetX}px, -2px, 0) scale(1.04)`
+                          : 'translate3d(0, 0, 0) scale(1)';
+
+                        const widthClass =
+                          block.buttons.length === 1
+                            ? 'flex-initial max-w-[85%] px-4'
+                            : 'flex-1 min-w-0 px-2.5';
+
+                        return (
+                          <button
+                            key={btn.id}
+                            type="button"
+                            onTouchStart={(e) => handleBtnTouchStart(index, btnIdx, btn.id, e)}
+                            onTouchMove={(e) => handleBtnTouchMove(index, e)}
+                            onTouchEnd={handleBtnTouchEnd}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (!buttonDragRef.current?.isDragging) {
+                                handleOpenButtonConfig(index, btnIdx, btn);
+                              }
+                            }}
+                            style={{
+                              transform: dynamicTransform,
+                              transition: isThisDragging ? 'none' : 'transform 0.2s cubic-bezier(0.2, 0.9, 0.3, 1)',
+                            }}
+                            className={`py-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 border cursor-pointer touch-none select-none relative ${widthClass} ${styleClass} ${jiggleClass} ${
+                              isThisDragging
+                                ? 'z-30 border-warm-accent ring-1 ring-warm-accent'
+                                : 'active:opacity-80'
+                            }`}
+                          >
+                            <span className="material-symbols-outlined text-[14px] leading-none opacity-85 shrink-0 pointer-events-none">
+                              {btn.type === 'copy_text' ? 'content_copy' : 'link'}
+                            </span>
+                            <span className="truncate block min-w-0 pointer-events-none">{btn.text}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
                   </div>
 
-              {focusedBlockIndex === index && (
+              {(focusedBlockIndex === index || block.type === 'button_row') && (
                 <div className="absolute right-0 -top-3 z-10 flex items-center gap-1 bg-[#FAF8F5] border border-cream-divider/80 px-1.5 py-0.5 rounded-full shadow-sm animate-page-fade">
                   <button
                     onMouseDown={(e) => e.preventDefault()}
@@ -2636,7 +2999,7 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
 
       
 
-      {isEditorActive && !showExportModal &&
+      {isEditorActive && !showExportModal && !editingButtonModal &&
         createPortal(
           <div
             data-format-bar="true"
@@ -2839,6 +3202,153 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                   ) : (
                     <span>{selectedExportChannels.length > 0 ? t('export_with_ad') : t('export_rich')}</span>
                   )}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+      {editingButtonModal &&
+        createPortal(
+          <div
+            data-modal="true"
+            onClick={() => setEditingButtonModal(null)}
+            className="fixed inset-0 z-50 flex flex-col justify-end bg-[#24201D]/45 transition-opacity duration-150"
+          >
+            <div
+              data-modal="true"
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-[420px] mx-auto bg-[#FAF8F5] rounded-t-3xl border-t border-cream-divider px-6 pt-3 pb-6 flex flex-col gap-3.5 shadow-xl animate-sheet-up"
+              style={{
+                paddingBottom: 'calc(max(var(--tg-content-bottom, 0px), var(--tg-safe-bottom, 0px), env(safe-area-inset-bottom, 0px)) + 18px)',
+              }}
+            >
+              <div className="w-10 h-1 rounded-full bg-cream-divider self-center shrink-0 mb-1" />
+              <div className="flex items-center justify-between pb-1 border-b border-cream-divider/50">
+                <span className="text-xs font-semibold uppercase tracking-wider text-warm-text">
+                  {t('btn_edit_title')}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setEditingButtonModal(null)}
+                  className="w-6 h-6 flex items-center justify-center rounded-full text-warm-muted hover:text-warm-text"
+                >
+                  <span className="material-symbols-outlined text-[16px]">close</span>
+                </button>
+              </div>
+              <div className="flex flex-col gap-2.5">
+                <div className="flex flex-col gap-1">
+                  <label className="text-[10px] font-semibold uppercase text-warm-muted">
+                    {t('btn_text_label')}
+                  </label>
+                  <input
+                    type="text"
+                    value={editingButtonModal.text}
+                    placeholder={t('btn_text_placeholder')}
+                    onChange={(e) =>
+                      setEditingButtonModal({ ...editingButtonModal, text: e.target.value })
+                    }
+                    className="w-full bg-cream-surface rounded-xl px-3 py-2 text-xs text-warm-text border-none focus:outline-none"
+                  />
+                </div>
+                <div className="flex items-center bg-cream-surface p-1 rounded-xl gap-1">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setEditingButtonModal({ ...editingButtonModal, type: 'url' })
+                    }
+                    className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                      editingButtonModal.type === 'url'
+                        ? 'bg-[#FAF8F5] text-warm-accent shadow-xs'
+                        : 'text-warm-muted'
+                    }`}
+                  >
+                    {t('btn_type_url')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setEditingButtonModal({ ...editingButtonModal, type: 'copy_text' })
+                    }
+                    className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                      editingButtonModal.type === 'copy_text'
+                        ? 'bg-[#FAF8F5] text-warm-accent shadow-xs'
+                        : 'text-warm-muted'
+                    }`}
+                  >
+                    {t('btn_type_copy')}
+                  </button>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-[10px] font-semibold uppercase text-warm-muted">
+                    {editingButtonModal.type === 'url' ? 'URL Link' : 'Copy Value'}
+                  </label>
+                  <input
+                    type="text"
+                    value={editingButtonModal.value}
+                    placeholder={
+                      editingButtonModal.type === 'url'
+                        ? t('btn_url_placeholder')
+                        : t('btn_copy_placeholder')
+                    }
+                    onChange={(e) =>
+                      setEditingButtonModal({ ...editingButtonModal, value: e.target.value })
+                    }
+                    className="w-full bg-cream-surface rounded-xl px-3 py-2 text-xs text-warm-text border-none focus:outline-none"
+                  />
+                </div>
+                <div className="flex flex-col gap-1 pt-1">
+                  <label className="text-[10px] font-semibold uppercase text-warm-muted">Color Theme</label>
+                  <div className="grid grid-cols-4 gap-2">
+                    {(['default', 'primary', 'success', 'danger'] as const).map((clr) => {
+                      const isActive = editingButtonModal.style === clr;
+                      const label = t(`btn_style_${clr}` as any);
+                      const bgClass =
+                        clr === 'primary'
+                          ? 'bg-[#2AABEE]'
+                          : clr === 'success'
+                          ? 'bg-[#3E7356]'
+                          : clr === 'danger'
+                          ? 'bg-[#BA4A38]'
+                          : 'bg-[#EAE4DC]';
+                      return (
+                        <button
+                          key={clr}
+                          type="button"
+                          onClick={() =>
+                            setEditingButtonModal({ ...editingButtonModal, style: clr })
+                          }
+                          className={`flex flex-col items-center gap-1 p-2 rounded-xl border transition-all ${
+                            isActive ? 'border-warm-accent bg-warm-accent-light' : 'border-transparent bg-cream-surface'
+                          }`}
+                        >
+                          <div className={`w-4 h-4 rounded-full ${bgClass}`} />
+                          <span className="text-[10px] font-medium text-warm-text">{label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center justify-between gap-2 pt-2 border-t border-cream-divider/50">
+                <button
+                  type="button"
+                  onClick={() =>
+                    deleteButtonFromRow(
+                      editingButtonModal.blockIndex,
+                      editingButtonModal.buttonIndex
+                    )
+                  }
+                  className="px-3 py-1.5 rounded-full text-xs font-semibold text-red-600 bg-red-50 active:scale-95 transition-transform"
+                >
+                  {t('btn_delete')}
+                </button>
+                <button
+                  type="button"
+                  onClick={saveEditedButton}
+                  className="px-5 py-1.5 rounded-full text-xs font-semibold text-[#FAF8F5] bg-warm-accent active:scale-95 transition-transform"
+                >
+                  {t('btn_save')}
                 </button>
               </div>
             </div>
