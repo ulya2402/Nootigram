@@ -54,6 +54,10 @@ export type InputRichBlock =
          url?: string;
          copy_text?: string;
        }[];
+     }
+  | {
+       type: 'footer';
+       text: string;
      };
 
 export interface InputRichMessage {

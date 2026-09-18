@@ -128,6 +128,17 @@
   "btn_delete": "Hapus",
   "btn_add_to_row": "+ Tombol",
   "btn_max_reached": "Maksimal 3 tombol per baris",
-  "btn_default_label": "Kunjungi Tautan",
-  "btn_new_label": "Tombol Baru"
+ "btn_default_label": "Kunjungi Tautan",
+  "btn_new_label": "Tombol Baru",
+  "tool_footer": "Catatan Kaki",
+  "footer_placeholder": "Catatan kaki / penutup editorial...",
+  "tool_time": "Waktu",
+  "time_modal_title": "Waktu Dinamis",
+  "time_label_datetime": "Tanggal & Waktu",
+  "time_label_format": "Format Tampilan Telegram",
+  "time_format_wdt": "Pintar / Dinamis (cth: 22:45 besok)",
+  "time_format_full": "Tanggal & Waktu Lengkap",
+  "time_format_time_only": "Jam Saja",
+  "time_format_rel": "Waktu Relatif",
+  "time_insert": "Sisipkan"
 }

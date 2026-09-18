@@ -91,6 +91,11 @@ export type ContentBlock =
         type: 'url' | 'copy_text';
         value: string;
       }[];
+    }
+  | {
+      id: string;
+      type: 'footer';
+      text: string;
     };
 
 export interface NoteItem {

@@ -107,6 +107,8 @@ export class TelegramService {
           if (/^<\/code>$/i.test(part)) return '</code>';
           if (/^<tg-spoiler>$/i.test(part)) return '<tg-spoiler>';
           if (/^<\/tg-spoiler>$/i.test(part)) return '</tg-spoiler>';
+          if (/^<tg-time(?:\s+[^>]*)?>$/i.test(part)) return part;
+          if (/^<\/tg-time>$/i.test(part)) return '</tg-time>';
           if (/^<a\s+href="[^"]*">$/i.test(part)) return part;
           if (/^<\/a>$/i.test(part)) return '</a>';
           return part.replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -117,8 +119,7 @@ export class TelegramService {
           .replace(/>/g, '&gt;');
       })
       .join('');
-
-    const tags = ['b', 'i', 'u', 's', 'code', 'tg-spoiler', 'a'];
+    const tags = ['b', 'i', 'u', 's', 'code', 'tg-spoiler', 'a', 'tg-time'];
     for (const tag of tags) {
       const openCount = (formatted.match(new RegExp(`<${tag}(?:\\s[^>]*)?>`, 'gi')) || []).length;
       const closeCount = (formatted.match(new RegExp(`</${tag}>`, 'gi')) || []).length;
@@ -268,6 +269,9 @@ export class TelegramService {
         }
         rowHtml += `</tg-button-row>\n\n`;
         html += rowHtml;
+      } else if (b.type === 'footer') {
+        const text = this.formatInlineHtml(b.text);
+        if (text) html += `<footer>${text}</footer>\n\n`;
       }
     }
     return html.trim();
@@ -328,6 +332,8 @@ export class TelegramService {
       .replace(/<tg-button-row[^>]*>([\s\S]*?)<\/tg-button-row>/gi, '$1\n')
       .replace(/<tg-button[^>]*type="url"[^>]*url="([^"]*)"[^>]*>([\s\S]*?)<\/tg-button>/gi, '<a href="$1">&#128279; $2</a> ')
       .replace(/<tg-button[^>]*type="copy_text"[^>]*text="([^"]*)"[^>]*>([\s\S]*?)<\/tg-button>/gi, '&#128203; <b>$2:</b> <code>$1</code> ')
+      .replace(/<tg-time[^>]*>([\s\S]*?)<\/tg-time>/gi, '&#128340; $1')
+      .replace(/<footer>([\s\S]*?)<\/footer>/gi, '\n— $1\n\n')
       .replace(/<li><input type="checkbox" checked>(.*?)<\/li>/gi, '  $1\n')
       .replace(/<li><input type="checkbox">(.*?)<\/li>/gi, '  $1\n')
       .replace(/<li>(.*?)<\/li>/gi, '  $1\n')

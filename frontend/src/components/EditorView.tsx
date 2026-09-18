@@ -210,6 +210,90 @@ export const EditorView: React.FC<EditorViewProps> = ({
     value: string;
   } | null>(null);
 
+  const [timePickerModal, setTimePickerModal] = useState<{
+    isOpen: boolean;
+    datetimeVal: string;
+    format: 'wDT' | 'full' | 'time' | 'rel';
+  }>({
+    isOpen: false,
+    datetimeVal: '',
+    format: 'wDT',
+  });
+
+  const savedRangeRef = useRef<Range | null>(null);
+
+  const openTimePicker = () => {
+    triggerHaptic('light');
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      savedRangeRef.current = sel.getRangeAt(0).cloneRange();
+    }
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    setTimePickerModal({
+      isOpen: true,
+      datetimeVal: `${year}-${month}-${day}T${hours}:${minutes}`,
+      format: 'wDT',
+    });
+  };
+
+  const insertDynamicTime = () => {
+    if (!timePickerModal.datetimeVal) return;
+    triggerHaptic('medium');
+    const dateObj = new Date(timePickerModal.datetimeVal);
+    const unixTimestamp = Math.floor(dateObj.getTime() / 1000);
+    const formatCode = timePickerModal.format === 'full' ? '' : timePickerModal.format;
+    const formatAttr = formatCode ? ` format="${formatCode}"` : '';
+    const localizedDisplay = dateObj.toLocaleDateString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+
+    const timeTagHtml = `<tg-time unix="${unixTimestamp}"${formatAttr}>${localizedDisplay}</tg-time>&nbsp;`;
+
+    if (savedRangeRef.current) {
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(savedRangeRef.current);
+      document.execCommand('insertHTML', false, timeTagHtml);
+      if (focusedBlockIndex !== null && currentNote.blocks[focusedBlockIndex]) {
+        const currentEl = blockElementRefs.current[currentNote.blocks[focusedBlockIndex].id];
+        const editableDiv = currentEl?.querySelector('[contenteditable]');
+        if (editableDiv) {
+          updateBlock(
+            focusedBlockIndex,
+            { ...currentNote.blocks[focusedBlockIndex], text: editableDiv.innerHTML } as ContentBlock,
+            true
+          );
+        }
+      }
+    } else {
+      const targetPos = focusedBlockIndex !== null && focusedBlockIndex >= 0 && focusedBlockIndex < currentNote.blocks.length
+        ? focusedBlockIndex + 1
+        : currentNote.blocks.length;
+      const newBlock: ContentBlock = {
+        id: `p-${Date.now()}`,
+        type: 'paragraph',
+        text: timeTagHtml,
+      };
+      const nextBlocks = [
+        ...currentNote.blocks.slice(0, targetPos),
+        newBlock,
+        ...currentNote.blocks.slice(targetPos),
+      ];
+      persistChange({ ...currentNote, blocks: nextBlocks }, true);
+      setFocusedBlockIndex(targetPos);
+    }
+    setTimePickerModal((prev) => ({ ...prev, isOpen: false }));
+    savedRangeRef.current = null;
+  };
+
   const toggleDetails = (blockId: string) => {
     triggerHaptic('light');
     setOpenDetailsMap((prev) => ({
@@ -1170,6 +1254,9 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
           ],
         };
         break;
+      case 'footer':
+        primaryBlock = { id: bId1, type: 'footer', text: '' };
+        break;
       default:
         primaryBlock = { id: bId1, type: 'paragraph', text: '' };
         break;
@@ -1641,6 +1728,13 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
             copy_text: btn.type === 'copy_text' ? btn.value : undefined,
           })),
         });
+      } else if (b.type === 'footer') {
+        if (b.text && b.text.trim()) {
+          richBlocks.push({
+            type: 'footer',
+            text: b.text,
+          });
+        }
       }
     });
 
@@ -1972,6 +2066,13 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
               >
                 <span className="material-symbols-outlined text-[14px] text-warm-accent">smart_button</span>
                 <span>{t('tool_button')}</span>
+              </button>
+              <button
+                onClick={() => appendBlockWithParagraph('footer')}
+                className="px-2.5 py-1 rounded-full bg-cream-surface text-xs font-medium flex items-center gap-1 shrink-0 physics-bounce"
+              >
+                <span className="material-symbols-outlined text-[14px] text-warm-accent">short_text</span>
+                <span>{t('tool_footer')}</span>
               </button>
             </>
           )}
@@ -2824,6 +2925,28 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                     />
                   </div>
                 )}
+                {block.type === 'footer' && (
+                  <div className="w-full my-2 flex flex-col gap-1 transition-all">
+                    <div className="flex items-center justify-between pb-0.5">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-warm-subtle flex items-center gap-1">
+                        <span className="material-symbols-outlined text-[13px]">short_text</span>
+                        <span>{t('tool_footer')}</span>
+                      </span>
+                    </div>
+                    <textarea
+                      rows={1}
+                      value={block.text}
+                      placeholder={t('footer_placeholder')}
+                      ref={(el) => {
+                        if (el) autoResize(el);
+                      }}
+                      onFocus={() => setFocusedBlockIndex(index)}
+                      onInput={(e) => autoResize(e.currentTarget)}
+                      onChange={(e) => updateBlock(index, { ...block, text: e.target.value })}
+                      className="w-full text-xs font-normal text-warm-muted leading-relaxed bg-transparent border-none focus:outline-none resize-none overflow-hidden placeholder:text-warm-subtle"
+                    />
+                  </div>
+                )}
                 {block.type === 'button_row' && (
                   <div
                     onClick={() => setFocusedBlockIndex(index)}
@@ -2999,7 +3122,7 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
 
       
 
-      {isEditorActive && !showExportModal && !editingButtonModal &&
+      {isEditorActive && !showExportModal && !editingButtonModal && !timePickerModal.isOpen &&
         createPortal(
           <div
             data-format-bar="true"
@@ -3078,6 +3201,17 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
               >
                 <span className="material-symbols-outlined text-[17px] leading-none">
                   visibility_off
+                </span>
+              </button>
+              <button
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  openTimePicker();
+                }}
+                className="flex items-center justify-center w-8 h-8 rounded-full transition-colors text-warm-muted hover:text-warm-text active:bg-cream-divider"
+              >
+                <span className="material-symbols-outlined text-[16px] leading-none">
+                  schedule
                 </span>
               </button>
               <div className="w-[1px] h-4 bg-cream-divider mx-1" />
@@ -3349,6 +3483,97 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                   className="px-5 py-1.5 rounded-full text-xs font-semibold text-[#FAF8F5] bg-warm-accent active:scale-95 transition-transform"
                 >
                   {t('btn_save')}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+      {timePickerModal.isOpen &&
+        createPortal(
+          <div
+            data-modal="true"
+            onClick={() => setTimePickerModal((prev) => ({ ...prev, isOpen: false }))}
+            className="fixed inset-0 z-50 flex flex-col justify-end bg-[#24201D]/45 transition-opacity duration-150"
+          >
+            <div
+              data-modal="true"
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-[420px] mx-auto bg-[#FAF8F5] rounded-t-3xl border-t border-cream-divider px-6 pt-3 pb-6 flex flex-col gap-3.5 shadow-xl animate-sheet-up"
+              style={{
+                paddingBottom: 'calc(max(var(--tg-content-bottom, 0px), var(--tg-safe-bottom, 0px), env(safe-area-inset-bottom, 0px)) + 18px)',
+              }}
+            >
+              <div className="w-10 h-1 rounded-full bg-cream-divider self-center shrink-0 mb-1" />
+              <div className="flex items-center justify-between pb-1 border-b border-cream-divider/50">
+                <span className="text-xs font-semibold uppercase tracking-wider text-warm-text">
+                  {t('time_modal_title')}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setTimePickerModal((prev) => ({ ...prev, isOpen: false }))}
+                  className="w-6 h-6 flex items-center justify-center rounded-full text-warm-muted hover:text-warm-text"
+                >
+                  <span className="material-symbols-outlined text-[16px]">close</span>
+                </button>
+              </div>
+              <div className="flex flex-col gap-3">
+                <div className="flex flex-col gap-1">
+                  <label className="text-[10px] font-semibold uppercase text-warm-muted">
+                    {t('time_label_datetime')}
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={timePickerModal.datetimeVal}
+                    onChange={(e) =>
+                      setTimePickerModal((prev) => ({ ...prev, datetimeVal: e.target.value }))
+                    }
+                    className="w-full bg-cream-surface rounded-xl px-3 py-2 text-xs text-warm-text border-none focus:outline-none font-mono"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-[10px] font-semibold uppercase text-warm-muted">
+                    {t('time_label_format')}
+                  </label>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {[
+                      { id: 'wDT', labelKey: 'time_format_wdt' },
+                      { id: 'full', labelKey: 'time_format_full' },
+                      { id: 'time', labelKey: 'time_format_time_only' },
+                      { id: 'rel', labelKey: 'time_format_rel' },
+                    ].map((fmt) => (
+                      <button
+                        key={fmt.id}
+                        type="button"
+                        onClick={() =>
+                          setTimePickerModal((prev) => ({ ...prev, format: fmt.id as any }))
+                        }
+                        className={`py-2 px-2 rounded-xl text-left text-[11px] font-medium border transition-colors flex flex-col gap-0.5 ${
+                          timePickerModal.format === fmt.id
+                            ? 'bg-warm-accent-light border-warm-accent text-warm-accent'
+                            : 'bg-cream-surface border-transparent text-warm-text'
+                        }`}
+                      >
+                        <span className="font-semibold">{t(fmt.labelKey as any)}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-cream-divider/50">
+                <button
+                  type="button"
+                  onClick={() => setTimePickerModal((prev) => ({ ...prev, isOpen: false }))}
+                  className="px-3.5 py-1.5 rounded-full text-xs font-semibold text-warm-muted bg-cream-surface active:scale-95 transition-transform"
+                >
+                  {t('deselect_all')}
+                </button>
+                <button
+                  type="button"
+                  onClick={insertDynamicTime}
+                  className="px-5 py-1.5 rounded-full text-xs font-semibold text-[#FAF8F5] bg-warm-accent active:scale-95 transition-transform"
+                >
+                  {t('time_insert')}
                 </button>
               </div>
             </div>

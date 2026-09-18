@@ -51,6 +51,22 @@ code {
   font-size: 0.9em;
 }
 
+tg-time {
+  background-color: rgba(138, 81, 34, 0.1);
+  color: #8A5122;
+  border-radius: 6px;
+  padding: 1px 6px;
+  font-size: 0.88em;
+  font-family: inherit;
+  font-weight: 600;
+  border-bottom: 1px dashed rgba(138, 81, 34, 0.4);
+  cursor: pointer;
+  user-select: text;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
 @keyframes pageFadeIn {
   from {
     opacity: 0;
