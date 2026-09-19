@@ -773,16 +773,9 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
       savedRangeRef.current.insertNode(a);
     }
 
-    if (focusedBlockIndex !== null && currentNote.blocks[focusedBlockIndex]) {
-      const currentEl = blockElementRefs.current[currentNote.blocks[focusedBlockIndex].id];
-      const editableDiv = currentEl?.querySelector('[contenteditable]');
-      if (editableDiv) {
-        updateBlock(
-          focusedBlockIndex,
-          { ...currentNote.blocks[focusedBlockIndex], text: editableDiv.innerHTML } as ContentBlock,
-          true
-        );
-      }
+    if (activeEditableRef.current) {
+      activeEditableRef.current.dispatchEvent(new Event('input', { bubbles: true }));
+      activeEditableRef.current = null;
     }
     setLinkModal((prev) => ({ ...prev, isOpen: false }));
     savedRangeRef.current = null;
@@ -872,20 +865,24 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
     };
   }, [updateActiveFormats]);
 
+  const activeEditableRef = useRef<HTMLElement | null>(null);
+
+  const syncActiveContentEditable = () => {
+    const sel = window.getSelection();
+    let node: Node | null = sel?.anchorNode || null;
+    if (node && node.nodeType === Node.TEXT_NODE) {
+      node = node.parentNode;
+    }
+    const el = (node as HTMLElement)?.closest<HTMLDivElement>('[contenteditable="true"]');
+    if (el) {
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  };
+
   const applyFormatCommand = (command: 'bold' | 'italic' | 'underline' | 'strikeThrough') => {
     triggerHaptic('light');
     document.execCommand(command, false);
-    if (focusedBlockIndex !== null && currentNote.blocks[focusedBlockIndex]) {
-      const currentEl = blockElementRefs.current[currentNote.blocks[focusedBlockIndex].id];
-      const editableDiv = currentEl?.querySelector('[contenteditable]');
-      if (editableDiv) {
-        updateBlock(
-          focusedBlockIndex,
-          { ...currentNote.blocks[focusedBlockIndex], text: editableDiv.innerHTML } as ContentBlock,
-          true
-        );
-      }
-    }
+    syncActiveContentEditable();
     updateActiveFormats();
   };
 
@@ -2408,17 +2405,12 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
 
                 {block.type === 'quote' && (
                   <div className="w-full my-1.5 rounded-r-xl border-l-[3.5px] border-warm-accent bg-cream-surface/75 px-3 py-2.5 flex flex-col gap-1.5 transition-all">
-                    <textarea
-                      rows={1}
-                      value={block.text}
+                    <EditableBlock
+                      html={block.text}
                       placeholder={t('quote_placeholder')}
-                      ref={(el) => {
-                        if (el) autoResize(el);
-                      }}
                       onFocus={() => setFocusedBlockIndex(index)}
-                      onInput={(e) => autoResize(e.currentTarget)}
-                      onChange={(e) => updateBlock(index, { ...block, text: e.target.value })}
-                      className="w-full text-[14.5px] text-warm-text leading-relaxed bg-transparent border-none focus:outline-none resize-none overflow-hidden"
+                      onChange={(newHtml) => updateBlock(index, { ...block, text: newHtml })}
+                      className="w-full text-[14.5px] text-warm-text leading-relaxed bg-transparent border-none focus:outline-none min-h-[22px]"
                     />
                     <input
                       type="text"
@@ -2438,17 +2430,12 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                         <span>{t('tool_quote_expand')}</span>
                       </span>
                     </div>
-                    <textarea
-                      rows={1}
-                      value={block.text}
+                    <EditableBlock
+                      html={block.text}
                       placeholder={t('quote_placeholder')}
-                      ref={(el) => {
-                        if (el) autoResize(el);
-                      }}
                       onFocus={() => setFocusedBlockIndex(index)}
-                      onInput={(e) => autoResize(e.currentTarget)}
-                      onChange={(e) => updateBlock(index, { ...block, text: e.target.value })}
-                      className="w-full text-[14.5px] text-warm-text leading-relaxed bg-transparent border-none focus:outline-none resize-none overflow-hidden"
+                      onChange={(newHtml) => updateBlock(index, { ...block, text: newHtml })}
+                      className="w-full text-[14.5px] text-warm-text leading-relaxed bg-transparent border-none focus:outline-none min-h-[22px]"
                     />
                     <input
                       type="text"
@@ -2460,20 +2447,14 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                     />
                   </div>
                 )}
-
                 {block.type === 'pullquote' && (
                   <div className="my-2 py-2 px-3 border-y border-cream-divider text-center flex flex-col gap-1">
-                    <textarea
-                      rows={1}
-                      value={block.text}
+                    <EditableBlock
+                      html={block.text}
                       placeholder={t('quote_placeholder')}
-                      ref={(el) => {
-                        if (el) autoResize(el);
-                      }}
                       onFocus={() => setFocusedBlockIndex(index)}
-                      onInput={(e) => autoResize(e.currentTarget)}
-                      onChange={(e) => updateBlock(index, { ...block, text: e.target.value })}
-                      className="w-full text-base font-serif italic text-warm-text text-center bg-transparent border-none focus:outline-none resize-none overflow-hidden"
+                      onChange={(newHtml) => updateBlock(index, { ...block, text: newHtml })}
+                      className="w-full text-base font-serif italic text-warm-text text-center bg-transparent border-none focus:outline-none min-h-[24px]"
                     />
                     <input
                       type="text"
@@ -2965,22 +2946,25 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                                         : 'border border-transparent'
                                     }`}
                                   >
-                                    <input
-                                      type="text"
-                                      value={col.text}
+                                    <EditableBlock
+                                      html={col.text}
                                       placeholder={rIdx === 0 ? `${t('table_col')} ${cIdx + 1}` : `${t('table_row')} ${rIdx + 1}`}
                                       onFocus={() => {
                                         setFocusedBlockIndex(index);
                                         setActiveTableCell({ blockIndex: index, rowIndex: rIdx, colIndex: cIdx });
                                       }}
-                                      onChange={(e) => {
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                          e.preventDefault();
+                                        }
+                                      }}
+                                      onChange={(newHtml) => {
                                         const nextCells = block.cells.map((r, ri) =>
-                                          r.map((c, ci) => (ri === rIdx && ci === cIdx ? { ...c, text: e.target.value } : c))
+                                          r.map((c, ci) => (ri === rIdx && ci === cIdx ? { ...c, text: newHtml } : c))
                                         );
                                         updateBlock(index, { ...block, cells: nextCells }, false);
                                       }}
-                                      style={{ outline: 'none', boxShadow: 'none' }}
-                                      className={`w-full min-w-0 bg-transparent border-none outline-none focus:outline-none focus:ring-0 text-warm-text font-medium transition-all ${
+                                      className={`w-full min-w-0 bg-transparent border-none outline-none focus:outline-none focus:ring-0 text-warm-text font-medium transition-all min-h-[22px] ${
                                         block.is_compact ? 'px-1.5 py-0.5 text-[11px]' : 'px-2.5 py-1.5 text-xs'
                                       } ${
                                         col.align === 'center' ? 'text-center' : col.align === 'right' ? 'text-right' : 'text-left'
@@ -3077,22 +3061,27 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                       onClick={() => toggleDetails(block.id)}
                       className="flex items-center justify-between px-3 py-2 bg-cream-surface/60 cursor-pointer select-none"
                     >
-                      <input
-                        type="text"
-                        value={block.summary}
-                        placeholder={t('details_summary_placeholder')}
-                        onClick={(e) => e.stopPropagation()}
-                        onFocus={() => setFocusedBlockIndex(index)}
-                        onChange={(e) => updateBlock(index, { ...block, summary: e.target.value })}
-                        className="flex-1 text-xs font-semibold text-warm-text bg-transparent border-none focus:outline-none pr-2"
-                      />
+                      <div onClick={(e) => e.stopPropagation()} className="flex-1 min-w-0 pr-2">
+                        <EditableBlock
+                          html={block.summary}
+                          placeholder={t('details_summary_placeholder')}
+                          onFocus={() => setFocusedBlockIndex(index)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                            }
+                          }}
+                          onChange={(newHtml) => updateBlock(index, { ...block, summary: newHtml })}
+                          className="w-full text-xs font-semibold text-warm-text bg-transparent border-none focus:outline-none min-h-[18px]"
+                        />
+                      </div>
                       <button
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
                           toggleDetails(block.id);
                         }}
-                        className="w-5 h-5 flex items-center justify-center text-warm-muted transition-transform duration-200"
+                        className="w-5 h-5 flex items-center justify-center text-warm-muted transition-transform duration-200 shrink-0"
                         style={{
                           transform: openDetailsMap[block.id] !== false ? 'rotate(180deg)' : 'rotate(0deg)',
                         }}
@@ -3109,17 +3098,12 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                     >
                       <div className="overflow-hidden">
                         <div className="p-3 border-t border-cream-divider/60">
-                          <textarea
-                            rows={1}
-                            value={block.text}
+                          <EditableBlock
+                            html={block.text}
                             placeholder={t('details_content_placeholder')}
-                            ref={(el) => {
-                              if (el) autoResize(el);
-                            }}
                             onFocus={() => setFocusedBlockIndex(index)}
-                            onInput={(e) => autoResize(e.currentTarget)}
-                            onChange={(e) => updateBlock(index, { ...block, text: e.target.value })}
-                            className="w-full text-xs leading-relaxed text-warm-text bg-transparent border-none focus:outline-none resize-none overflow-hidden"
+                            onChange={(newHtml) => updateBlock(index, { ...block, text: newHtml })}
+                            className="w-full text-xs leading-relaxed text-warm-text bg-transparent border-none focus:outline-none min-h-[22px]"
                           />
                         </div>
                       </div>
@@ -3153,24 +3137,19 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                   </div>
                 )}
                 {block.type === 'footer' && (
-                  <div className="w-full my-2 flex flex-col gap-1 transition-all">
+                  <div className="w-full my-2 flex flex-col gap-1 transition-all border-t border-cream-divider/50 pt-1.5">
                     <div className="flex items-center justify-between pb-0.5">
                       <span className="text-[10px] font-semibold uppercase tracking-wider text-warm-subtle flex items-center gap-1">
                         <span className="material-symbols-outlined text-[13px]">short_text</span>
                         <span>{t('tool_footer')}</span>
                       </span>
                     </div>
-                    <textarea
-                      rows={1}
-                      value={block.text}
+                    <EditableBlock
+                      html={block.text}
                       placeholder={t('footer_placeholder')}
-                      ref={(el) => {
-                        if (el) autoResize(el);
-                      }}
                       onFocus={() => setFocusedBlockIndex(index)}
-                      onInput={(e) => autoResize(e.currentTarget)}
-                      onChange={(e) => updateBlock(index, { ...block, text: e.target.value })}
-                      className="w-full text-xs font-normal text-warm-muted leading-relaxed bg-transparent border-none focus:outline-none resize-none overflow-hidden placeholder:text-warm-subtle"
+                      onChange={(newHtml) => updateBlock(index, { ...block, text: newHtml })}
+                      className="w-full text-xs font-normal text-warm-muted leading-relaxed bg-transparent border-none focus:outline-none min-h-[20px]"
                     />
                   </div>
                 )}

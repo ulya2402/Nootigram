@@ -185,13 +185,13 @@ export class TelegramService {
         if (b.is_striped) attrs += ' striped';
         if (b.is_compact) attrs += ' compact';
         let tbl = `<table${attrs}>`;
-        if (b.caption) tbl += `<caption>${this.escapeText(b.caption)}</caption>`;
+        if (b.caption) tbl += `<caption>${this.formatInlineHtml(b.caption)}</caption>`;
         for (let rIdx = 0; rIdx < b.cells.length; rIdx++) {
           tbl += '<tr>';
           for (const cell of b.cells[rIdx]) {
             const tag = cell.is_header || rIdx === 0 ? 'th' : 'td';
             const align = cell.align ? ` align="${cell.align}"` : '';
-            tbl += `<${tag}${align}>${this.escapeText(cell.text)}</${tag}>`;
+            tbl += `<${tag}${align}>${this.formatInlineHtml(cell.text)}</${tag}>`;
           }
           tbl += '</tr>';
         }
@@ -225,7 +225,7 @@ export class TelegramService {
         }
       } else if (b.type === 'details') {
         const detText = (b.blocks && b.blocks[0] && 'text' in b.blocks[0] ? (b.blocks[0] as any).text : '') || (b as any).text || '';
-        html += `<details><summary>${this.escapeText(b.summary)}</summary>${this.formatInlineHtml(detText)}</details>\n\n`;
+        html += `<details><summary>${this.formatInlineHtml(b.summary)}</summary>${this.formatInlineHtml(detText)}</details>\n\n`;
       } else if (b.type === 'media') {
         const captionText = b.caption ? this.escapeText(b.caption) : '';
         const captionTag = captionText ? `<figcaption>${captionText}</figcaption>` : '';
