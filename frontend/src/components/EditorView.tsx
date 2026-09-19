@@ -385,16 +385,17 @@ const handleAudioFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) =
     const targetPos = focusedBlockIndex !== null && focusedBlockIndex >= 0 && focusedBlockIndex < currentNote.blocks.length
       ? focusedBlockIndex + 1
       : currentNote.blocks.length;
-    const nextBlocks = [
-      ...currentNote.blocks.slice(0, targetPos),
-      newBlock,
-      trailingParagraph,
-      ...currentNote.blocks.slice(targetPos),
-    ];
-    persistChange({ ...currentNote, blocks: nextBlocks }, true);
-    setFocusedBlockIndex(targetPos);
-    window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('success');
-  } catch (err) {
+    captureFlipPositions();
+      const nextBlocks = [
+        ...currentNote.blocks.slice(0, targetPos),
+        newBlock,
+        trailingParagraph,
+        ...currentNote.blocks.slice(targetPos),
+      ];
+      persistChange({ ...currentNote, blocks: nextBlocks }, true);
+      setFocusedBlockIndex(targetPos);
+      window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('success');
+    } catch (err) {
     console.error(`AUDIO_UPLOAD_FAILED: ${(err as Error).message}`);
     triggerHaptic('heavy');
     setExportNotice(t('export_failed'));
@@ -499,6 +500,19 @@ const handleDocFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => 
   const flipPositionsRef = useRef<Map<string, number>>(new Map());
   const lastEnterRef = useRef<{ index: number; time: number } | null>(null);
   const pendingDeletionsRef = useRef<Set<string>>(new Set());
+
+  const captureFlipPositions = useCallback(() => {
+    const container = scrollContainerRef.current;
+    const scrollOffset = container ? container.scrollTop : 0;
+    const positions = new Map<string, number>();
+    currentNote.blocks.forEach((b) => {
+      const el = blockElementRefs.current[b.id];
+      if (el) {
+        positions.set(b.id, el.getBoundingClientRect().top + scrollOffset);
+      }
+    });
+    flipPositionsRef.current = positions;
+  }, [currentNote.blocks]);
 
   useLayoutEffect(() => {
     if (flipPositionsRef.current.size === 0) return;
@@ -1065,16 +1079,39 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
   const removeBlock = (index: number) => {
     triggerHaptic('medium');
     const block = currentNote.blocks[index];
-    if (block && block.type === 'media' && Array.isArray(block.images)) {
+    if (!block) return;
+    if (block.type === 'media' && Array.isArray(block.images)) {
       block.images.forEach((img) => {
         if (img.delete_url) {
           pendingDeletionsRef.current.add(img.delete_url);
         }
       });
     }
-    const filtered = currentNote.blocks.filter((_, i) => i !== index);
-    persistChange({ ...currentNote, blocks: filtered }, true);
-    setFocusedBlockIndex(null);
+
+    const executeDelete = () => {
+      captureFlipPositions();
+      const filtered = currentNote.blocks.filter((b) => b.id !== block.id);
+      persistChange({ ...currentNote, blocks: filtered }, true);
+      setFocusedBlockIndex(null);
+    };
+
+    const el = blockElementRefs.current[block.id];
+    if (el) {
+      const anim = el.animate(
+        [
+          { opacity: 1, transform: 'translate3d(0, 0, 0) scale(1)' },
+          { opacity: 0, transform: 'translate3d(0, -8px, 0) scale(0.985)' },
+        ],
+        {
+          duration: 160,
+          easing: 'cubic-bezier(0.4, 0, 0.2, 1)',
+          fill: 'forwards',
+        }
+      );
+      anim.onfinish = executeDelete;
+    } else {
+      executeDelete();
+    }
   };
 
   const removeImageFromBlock = (blockIndex: number, imageIndex: number) => {
@@ -1116,6 +1153,8 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
     triggerHaptic('light');
     const currentBlock = currentNote.blocks[index];
     if (!currentBlock || currentBlock.type !== 'paragraph') return;
+
+    captureFlipPositions();
     const newBlockId = `p-${Date.now()}`;
     const updatedCurrent: ContentBlock = {
       id: currentBlock.id,
@@ -1127,6 +1166,7 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
       type: 'paragraph',
       text: rightHtml,
     };
+
     const nextBlocks = [
       ...currentNote.blocks.slice(0, index),
       updatedCurrent,
@@ -1293,31 +1333,18 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
     const targetIndex = direction === 'up' ? index - 1 : index + 1;
     if (targetIndex < 0 || targetIndex >= currentNote.blocks.length) return;
     triggerHaptic('light');
-
-    const container = scrollContainerRef.current;
-    const scrollOffset = container ? container.scrollTop : 0;
-    const positions = new Map<string, number>();
-
-    currentNote.blocks.forEach((b) => {
-      const el = blockElementRefs.current[b.id];
-      if (el) {
-        positions.set(b.id, el.getBoundingClientRect().top + scrollOffset);
-      }
-    });
-    flipPositionsRef.current = positions;
+    captureFlipPositions();
 
     const nextBlocks = [...currentNote.blocks];
     const temp = nextBlocks[index];
     nextBlocks[index] = nextBlocks[targetIndex];
     nextBlocks[targetIndex] = temp;
-
     if (activeTableCell && activeTableCell.blockIndex === index) {
       setActiveTableCell({
         ...activeTableCell,
         blockIndex: targetIndex,
       });
     }
-
     persistChange({ ...currentNote, blocks: nextBlocks }, true);
     setFocusedBlockIndex(targetIndex);
   };
@@ -1417,15 +1444,20 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
       type: 'paragraph',
       text: '',
     };
+
     const targetIndex = focusedBlockIndex !== null && focusedBlockIndex >= 0 && focusedBlockIndex < currentNote.blocks.length
       ? focusedBlockIndex + 1
       : currentNote.blocks.length;
+
     const insertedBlocks = type === 'paragraph' ? [primaryBlock] : [primaryBlock, trailingParagraph];
+
+    captureFlipPositions();
     const nextBlocks = [
       ...currentNote.blocks.slice(0, targetIndex),
       ...insertedBlocks,
       ...currentNote.blocks.slice(targetIndex),
     ];
+
     persistChange({ ...currentNote, blocks: nextBlocks }, true);
     setFocusedBlockIndex(targetIndex);
     setTimeout(() => {
@@ -2364,7 +2396,7 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
               ref={(el) => {
                 blockElementRefs.current[block.id] = el;
               }}
-              className="relative group flex items-start gap-1 w-full min-w-0"
+              className="relative group flex items-start gap-1 w-full min-w-0 animate-block-enter"
             >
               <div className="flex-1 min-w-0 w-full">
                 {block.type === 'paragraph' && (
