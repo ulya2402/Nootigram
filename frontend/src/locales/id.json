@@ -151,5 +151,7 @@
   "time_format_full": "Tanggal & Waktu Lengkap",
   "time_format_time_only": "Jam Saja",
   "time_format_rel": "Waktu Relatif",
-  "time_insert": "Sisipkan"
+  "time_insert": "Sisipkan",
+  "lang_modal_title": "Pilih Bahasa",
+  "select_language": "Bahasa"
 }

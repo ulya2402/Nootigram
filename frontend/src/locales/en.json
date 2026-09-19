@@ -151,5 +151,7 @@
   "time_format_full": "Full Date & Time",
   "time_format_time_only": "Time Only",
   "time_format_rel": "Relative Duration",
-  "time_insert": "Insert"
+  "time_insert": "Insert",
+  "lang_modal_title": "Choose Language",
+  "select_language": "Language"
 }

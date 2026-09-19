@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useTransition, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { HomeView } from './components/HomeView';
 import { NotebooksView } from './components/NotebooksView';
 import { FavoritesView } from './components/FavoritesView';
@@ -6,7 +7,7 @@ import { EditorView } from './components/EditorView';
 import { ChannelsView } from './components/ChannelsView';
 import { NoteItem, TopicItem, ChannelItem } from './types';
 import { fetchBootstrap, syncNotesBatch, deleteNoteApi, deleteNotesBatchApi, createTopicApi, deleteTopicApi, fetchChannels } from './services/api';
-import { setLanguage, t, subscribeLanguage } from './services/i18n';
+import { setLanguage, getLanguage, t, subscribeLanguage, SUPPORTED_LANGUAGES } from './services/i18n';
 import { deleteFromImgbb } from './services/imgbb';
 
 let isTelegramBound = false;
@@ -51,8 +52,8 @@ export const App: React.FC = () => {
   useEffect(() => {
     refreshChannels();
   }, [refreshChannels]);
-  const [, setCurrentLang] = useState<string>(() => localStorage.getItem('notigram_lang') || 'en');
-
+  const [currentLang, setCurrentLang] = useState<string>(() => getLanguage());
+  const [showLanguageDropdown, setShowLanguageDropdown] = useState<boolean>(false);
   useEffect(() => {
     return subscribeLanguage((lang: string) => {
       setCurrentLang(lang);
@@ -162,7 +163,10 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     fetchBootstrap().then((res) => {
-      setLanguage(res.language_code || 'en');
+      const stored = localStorage.getItem('notigram_lang');
+      if (!stored && res.language_code) {
+        setLanguage(res.language_code);
+      }
       if (res.topics && res.topics.length > 0) {
         setTopics(res.topics);
         localStorage.setItem(getStorageKey('notigram_user_topics'), JSON.stringify(res.topics));
@@ -349,12 +353,69 @@ export const App: React.FC = () => {
                 {activeTab === 'notebooks' ? t('notebooks_title') : t('favorites_title')}
               </h1>
             )}
-            <div className="w-7 h-7 rounded-full bg-cream-surface text-warm-text font-semibold text-xs flex items-center justify-center border border-cream-divider overflow-hidden">
-              {userPhoto ? (
-                <img src={userPhoto} alt={userName} className="w-full h-full object-cover" />
-              ) : (
-                <span>{userName.charAt(0).toUpperCase()}</span>
-              )}
+            <div className="flex items-center gap-2.5">
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic('light');
+                    setShowLanguageDropdown((prev) => !prev);
+                  }}
+                  className="flex items-center gap-0.5 text-warm-muted hover:text-warm-text transition-colors py-1 px-1 active:opacity-60 select-none"
+                >
+                  <span className="text-[11px] font-mono font-semibold tracking-wider uppercase">
+                    {currentLang}
+                  </span>
+                  <span
+                    className={`material-symbols-outlined text-[14px] leading-none transition-transform duration-200 ${
+                      showLanguageDropdown ? 'rotate-180 text-warm-accent' : 'text-warm-subtle'
+                    }`}
+                  >
+                    expand_more
+                  </span>
+                </button>
+                {showLanguageDropdown && (
+                  <>
+                    <div
+                      onClick={() => setShowLanguageDropdown(false)}
+                      className="fixed inset-0 z-30"
+                    />
+                    <div className="absolute right-0 top-full mt-1.5 w-44 max-h-56 overflow-y-auto no-scrollbar overscroll-contain bg-[#FAF8F5] border border-cream-divider rounded-2xl shadow-sm p-1 z-40 animate-toc-down flex flex-col gap-0.5">
+                      {SUPPORTED_LANGUAGES.map((item) => {
+                        const isSelected = currentLang === item.code;
+                        return (
+                          <button
+                            key={item.code}
+                            type="button"
+                            onClick={() => {
+                              triggerHaptic('light');
+                              setLanguage(item.code);
+                              setShowLanguageDropdown(false);
+                            }}
+                            className={`w-full flex items-center justify-between px-3 py-1.5 rounded-xl text-xs transition-colors shrink-0 ${
+                              isSelected
+                                ? 'bg-cream-surface text-warm-accent font-semibold'
+                                : 'text-warm-text hover:bg-cream-surface/60'
+                            }`}
+                          >
+                            <span>{item.name}</span>
+                            <span className="text-[10px] font-mono text-warm-muted uppercase">
+                              {item.code}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </div>
+              <div className="w-7 h-7 rounded-full bg-cream-surface text-warm-text font-semibold text-xs flex items-center justify-center border border-cream-divider overflow-hidden">
+                {userPhoto ? (
+                  <img src={userPhoto} alt={userName} className="w-full h-full object-cover" />
+                ) : (
+                  <span>{userName.charAt(0).toUpperCase()}</span>
+                )}
+              </div>
             </div>
           </div>
         </header>
@@ -460,6 +521,6 @@ export const App: React.FC = () => {
           </div>
         </nav>
       )}
-    </div>
+      </div>
   );
 };
