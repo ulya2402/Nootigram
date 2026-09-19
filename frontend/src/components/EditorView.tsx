@@ -161,6 +161,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
           id,
           type: 'button_row',
           align: b.align || 'center',
+          full_width: b.full_width !== undefined ? Boolean(b.full_width) : false,
           buttons: Array.isArray(b.buttons)
             ? b.buttons.map((btn: any, bIdx: number) => ({
                 id: btn.id || `btn-${Date.now()}-${bIdx}`,
@@ -1243,6 +1244,7 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
           id: bId1,
           type: 'button_row',
           align: 'center',
+          full_width: false,
           buttons: [
             {
               id: `btn-${Date.now()}`,
@@ -1478,7 +1480,14 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
     triggerHaptic('light');
     const block = currentNote.blocks[blockIndex];
     if (block.type !== 'button_row') return;
-    updateBlock(blockIndex, { ...block, align }, true);
+    updateBlock(blockIndex, { ...block, align, full_width: false }, true);
+  };
+
+  const toggleButtonRowFullWidth = (blockIndex: number) => {
+    triggerHaptic('light');
+    const block = currentNote.blocks[blockIndex];
+    if (block.type !== 'button_row') return;
+    updateBlock(blockIndex, { ...block, full_width: !block.full_width }, true);
   };
 
   const addButtonToRow = (blockIndex: number) => {
@@ -1728,7 +1737,8 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
       } else if (b.type === 'button_row') {
         richBlocks.push({
           type: 'button_row',
-          align: b.align || 'center',
+          align: b.full_width ? undefined : (b.align || 'center'),
+          full_width: Boolean(b.full_width),
           buttons: b.buttons.map((btn) => ({
             text: btn.text,
             style: btn.style === 'default' ? undefined : btn.style,
@@ -2973,34 +2983,51 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
+                            toggleButtonRowFullWidth(index);
+                          }}
+                          title={t('btn_fit_message')}
+                          className={`w-6 h-6 flex items-center justify-center rounded transition-colors ${
+                            block.full_width ? 'text-warm-accent bg-[#FAF8F5] shadow-xs' : 'text-warm-muted hover:text-warm-text'
+                          }`}
+                        >
+                          <span className="material-symbols-outlined text-[14px]">fit_screen</span>
+                        </button>
+                        <div className="w-[1px] h-3.5 bg-cream-divider mx-0.5" />
+                        <button
+                          type="button"
+                          disabled={block.full_width}
+                          onClick={(e) => {
+                            e.stopPropagation();
                             setButtonRowAlign(index, 'left');
                           }}
                           className={`w-6 h-6 flex items-center justify-center rounded transition-colors ${
-                            block.align === 'left' ? 'text-warm-accent bg-[#FAF8F5] shadow-xs' : 'text-warm-muted hover:text-warm-text'
+                            !block.full_width && block.align === 'left' ? 'text-warm-accent bg-[#FAF8F5] shadow-xs' : 'text-warm-muted hover:text-warm-text disabled:opacity-30'
                           }`}
                         >
                           <span className="material-symbols-outlined text-[14px]">format_align_left</span>
                         </button>
                         <button
                           type="button"
+                          disabled={block.full_width}
                           onClick={(e) => {
                             e.stopPropagation();
                             setButtonRowAlign(index, 'center');
                           }}
                           className={`w-6 h-6 flex items-center justify-center rounded transition-colors ${
-                            block.align === 'center' ? 'text-warm-accent bg-[#FAF8F5] shadow-xs' : 'text-warm-muted hover:text-warm-text'
+                            !block.full_width && (!block.align || block.align === 'center') ? 'text-warm-accent bg-[#FAF8F5] shadow-xs' : 'text-warm-muted hover:text-warm-text disabled:opacity-30'
                           }`}
                         >
                           <span className="material-symbols-outlined text-[14px]">format_align_center</span>
                         </button>
                         <button
                           type="button"
+                          disabled={block.full_width}
                           onClick={(e) => {
                             e.stopPropagation();
                             setButtonRowAlign(index, 'right');
                           }}
                           className={`w-6 h-6 flex items-center justify-center rounded transition-colors ${
-                            block.align === 'right' ? 'text-warm-accent bg-[#FAF8F5] shadow-xs' : 'text-warm-muted hover:text-warm-text'
+                            !block.full_width && block.align === 'right' ? 'text-warm-accent bg-[#FAF8F5] shadow-xs' : 'text-warm-muted hover:text-warm-text disabled:opacity-30'
                           }`}
                         >
                           <span className="material-symbols-outlined text-[14px]">format_align_right</span>
@@ -3021,13 +3048,11 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                     </div>
                     <div
                       className={`flex items-center gap-2 py-2 w-full ${
-                        block.buttons.length === 1
-                          ? block.align === 'center'
-                            ? 'justify-center'
-                            : block.align === 'right'
-                            ? 'justify-end'
-                            : 'justify-start'
-                          : 'justify-between'
+                        block.align === 'right'
+                          ? 'justify-end'
+                          : block.align === 'left'
+                          ? 'justify-start'
+                          : 'justify-center'
                       }`}
                     >
                       {block.buttons.map((btn, btnIdx) => {
@@ -3054,10 +3079,9 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                           ? `translate3d(${dragOffsetX}px, -2px, 0) scale(1.04)`
                           : 'translate3d(0, 0, 0) scale(1)';
 
-                        const widthClass =
-                          block.buttons.length === 1
-                            ? 'flex-initial max-w-[85%] px-4'
-                            : 'flex-1 min-w-0 px-2.5';
+                        const widthClass = block.full_width
+                          ? 'flex-1 min-w-0 max-w-full px-3'
+                          : 'flex-initial min-w-0 max-w-[85%] px-4';
 
                         return (
                           <button
@@ -3074,7 +3098,10 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                             }}
                             style={{
                               transform: dynamicTransform,
-                              transition: isThisDragging ? 'none' : 'transform 0.2s cubic-bezier(0.2, 0.9, 0.3, 1)',
+                              transition: isThisDragging
+                                ? 'none'
+                                : 'transform 0.2s cubic-bezier(0.2, 0.9, 0.3, 1), flex 0.38s cubic-bezier(0.4, 0, 0.2, 1), max-width 0.38s cubic-bezier(0.4, 0, 0.2, 1), padding 0.38s cubic-bezier(0.4, 0, 0.2, 1)',
+                              willChange: isThisDragging ? 'transform' : 'transform, flex, max-width',
                             }}
                             className={`py-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 border cursor-pointer touch-none select-none relative ${widthClass} ${styleClass} ${jiggleClass} ${
                               isThisDragging

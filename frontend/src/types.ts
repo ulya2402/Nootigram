@@ -83,7 +83,8 @@ export type ContentBlock =
   | {
       id: string;
       type: 'button_row';
-      align: 'left' | 'center' | 'right';
+      align?: 'left' | 'center' | 'right';
+      full_width?: boolean;
       buttons: {
         id: string;
         text: string;

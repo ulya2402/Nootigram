@@ -130,6 +130,7 @@
   "btn_max_reached": "Max 3 buttons per row",
   "btn_default_label": "Open Link",
   "btn_new_label": "New Button",
+  "btn_fit_message": "Fit Message Width",
   "tool_footer": "Footer",
   "footer_placeholder": "Editorial footer / closing notes...",
   "tool_time": "Time",
