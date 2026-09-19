@@ -2417,13 +2417,57 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                 )}
 
                 {block.type === 'heading' && (
-                  <input
-                    type="text"
+                  <textarea
+                    rows={1}
                     value={block.text}
                     placeholder={`${t('heading_placeholder')} (H${block.size})`}
+                    ref={(el) => {
+                      if (el) autoResize(el);
+                    }}
                     onFocus={() => setFocusedBlockIndex(index)}
-                    onChange={(e) => updateBlock(index, { ...block, text: e.target.value })}
-                    className={`w-full font-semibold tracking-tight text-warm-text bg-transparent border-none focus:outline-none placeholder:text-warm-subtle pt-0.5 ${
+                    onInput={(e) => autoResize(e.currentTarget)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        triggerHaptic('light');
+                        const newBlockId = `p-${Date.now()}`;
+                        const newBlock: ContentBlock = {
+                          id: newBlockId,
+                          type: 'paragraph',
+                          text: '',
+                        };
+                        const nextBlocks = [
+                          ...currentNote.blocks.slice(0, index + 1),
+                          newBlock,
+                          ...currentNote.blocks.slice(index + 1),
+                        ];
+                        persistChange({ ...currentNote, blocks: nextBlocks }, true);
+                        setFocusedBlockIndex(index + 1);
+                        setTimeout(() => {
+                          const el = blockElementRefs.current[newBlockId];
+                          const editable = el?.querySelector<HTMLDivElement>('[contenteditable="true"]');
+                          if (editable) {
+                            setCaretToStart(editable);
+                          }
+                        }, 30);
+                      } else if (e.key === 'Backspace' && block.text === '') {
+                        e.preventDefault();
+                        triggerHaptic('light');
+                        removeBlock(index);
+                        if (index > 0) {
+                          const prevBlock = currentNote.blocks[index - 1];
+                          if (prevBlock) {
+                            setTimeout(() => {
+                              const prevEl = blockElementRefs.current[prevBlock.id];
+                              const targetFocus = prevEl?.querySelector<HTMLElement>('[contenteditable="true"], input, textarea');
+                              targetFocus?.focus();
+                            }, 40);
+                          }
+                        }
+                      }
+                    }}
+                    onChange={(e) => updateBlock(index, { ...block, text: e.target.value.replace(/\r?\n/g, ' ') })}
+                    className={`w-full font-semibold tracking-tight text-warm-text bg-transparent border-none focus:outline-none placeholder:text-warm-subtle pt-0.5 resize-none overflow-hidden break-words ${
                       block.size === 1
                         ? 'text-xl font-bold'
                         : block.size === 2
