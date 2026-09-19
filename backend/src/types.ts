@@ -6,8 +6,8 @@ export interface Env {
   IMGBB_API_KEYS?: string;
 }
 
-export type InputRichBlock =
-  | { type: 'heading'; text: string; size: 1 | 2 | 3 | 4 | 5 | 6 }
+  export type InputRichBlock =
+  | { type: 'heading'; text: string; size: 1 | 2 | 3 | 4 | 5 | 6; id?: string }
   | { type: 'paragraph'; text: string }
   | { type: 'pre'; text: string; language?: string }
   | { type: 'divider' }

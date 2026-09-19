@@ -107,9 +107,11 @@ export class TelegramService {
           if (/^<\/code>$/i.test(part)) return '</code>';
           if (/^<tg-spoiler>$/i.test(part)) return '<tg-spoiler>';
           if (/^<\/tg-spoiler>$/i.test(part)) return '</tg-spoiler>';
+          if (/^<mark>$/i.test(part)) return '<mark>';
+          if (/^<\/mark>$/i.test(part)) return '</mark>';
           if (/^<tg-time(?:\s+[^>]*)?>$/i.test(part)) return part;
           if (/^<\/tg-time>$/i.test(part)) return '</tg-time>';
-          if (/^<a\s+href="[^"]*">$/i.test(part)) return part;
+          if (/^<a\s+(?:href="[^"]*"|name="[^"]*")>$/i.test(part)) return part;
           if (/^<\/a>$/i.test(part)) return '</a>';
           return part.replace(/</g, '&lt;').replace(/>/g, '&gt;');
         }
@@ -119,7 +121,7 @@ export class TelegramService {
           .replace(/>/g, '&gt;');
       })
       .join('');
-    const tags = ['b', 'i', 'u', 's', 'code', 'tg-spoiler', 'a', 'tg-time'];
+    const tags = ['b', 'i', 'u', 's', 'code', 'tg-spoiler', 'a', 'tg-time', 'mark'];
     for (const tag of tags) {
       const openCount = (formatted.match(new RegExp(`<${tag}(?:\\s[^>]*)?>`, 'gi')) || []).length;
       const closeCount = (formatted.match(new RegExp(`</${tag}>`, 'gi')) || []).length;
@@ -149,7 +151,10 @@ export class TelegramService {
       if (b.type === 'heading') {
         const size = b.size || 2;
         const text = this.escapeText(b.text);
-        if (text) html += `<h${size}>${text}</h${size}>\n`;
+        const headingId = (b as { id?: string }).id;
+        const anchorName = headingId ? `chapter-${this.escapeText(headingId)}` : '';
+        const anchorTag = anchorName ? `<a name="${anchorName}"></a>` : '';
+        if (text) html += `${anchorTag}<h${size}>${text}</h${size}>\n`;
       } else if (b.type === 'paragraph') {
         const text = this.formatInlineHtml(b.text);
         if (text) html += `<p>${text}</p>\n`;

@@ -71,7 +71,8 @@ const EditableBlock: React.FC<{
   onFocus?: () => void;
   onChange: (newHtml: string) => void;
   onKeyDown?: (e: React.KeyboardEvent<HTMLDivElement>) => void;
-}> = ({ html, placeholder, className, onFocus, onChange, onKeyDown }) => {
+  onAnchorClick?: (href: string) => void;
+}> = ({ html, placeholder, className, onFocus, onChange, onKeyDown, onAnchorClick }) => {
   const divRef = useRef<HTMLDivElement>(null);
   const lastHtmlRef = useRef<string | null>(null);
 
@@ -89,6 +90,17 @@ const EditableBlock: React.FC<{
     document.execCommand('insertText', false, text);
   };
 
+  const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement | null;
+    const anchor = target?.closest('a');
+    if (anchor && onAnchorClick) {
+      const href = anchor.getAttribute('href') || '';
+      if (href) {
+        onAnchorClick(href);
+      }
+    }
+  };
+
   return (
     <div
       ref={divRef}
@@ -96,6 +108,7 @@ const EditableBlock: React.FC<{
       suppressContentEditableWarning
       data-placeholder={placeholder}
       onFocus={onFocus}
+      onClick={handleClick}
       onInput={(e) => {
         const currentHtml = e.currentTarget.innerHTML;
         lastHtmlRef.current = currentHtml;
@@ -452,6 +465,8 @@ const handleDocFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => 
     strike: boolean;
     code: boolean;
     spoiler: boolean;
+    mark: boolean;
+    link: boolean;
   }>({
     bold: false,
     italic: false,
@@ -459,6 +474,20 @@ const handleDocFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => 
     strike: false,
     code: false,
     spoiler: false,
+    mark: false,
+    link: false,
+  });
+
+  const [linkModal, setLinkModal] = useState<{
+    isOpen: boolean;
+    url: string;
+    text: string;
+    isEditing: boolean;
+  }>({
+    isOpen: false,
+    url: '',
+    text: '',
+    isEditing: false,
   });
   const [botPromptModal, setBotPromptModal] = useState<{ isOpen: boolean; botUsername: string }>({
     isOpen: false,
@@ -654,6 +683,8 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
         strike: false,
         code: false,
         spoiler: false,
+        mark: false,
+        link: false,
       });
       return;
     }
@@ -669,8 +700,129 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
       strike: document.queryCommandState('strikeThrough'),
       code: Boolean(parentEl?.closest('code')),
       spoiler: Boolean(parentEl?.closest('tg-spoiler')),
+      mark: Boolean(parentEl?.closest('mark')),
+      link: Boolean(parentEl?.closest('a')),
     });
   }, []);
+
+  const openLinkModal = () => {
+    triggerHaptic('light');
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return;
+    const range = sel.getRangeAt(0);
+    savedRangeRef.current = range.cloneRange();
+    let parentNode: Node | null = range.commonAncestorContainer;
+    if (parentNode.nodeType === Node.TEXT_NODE) {
+      parentNode = parentNode.parentNode;
+    }
+    const existingAnchor = (parentNode as HTMLElement)?.closest('a');
+    const linkText = existingAnchor ? (existingAnchor.textContent || '') : range.toString().trim();
+    const linkHref = existingAnchor ? (existingAnchor.getAttribute('href') || '') : '';
+
+    sel.removeAllRanges();
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+    setIsEditorActive(false);
+
+    setLinkModal({
+      isOpen: true,
+      url: linkHref,
+      text: linkText,
+      isEditing: Boolean(existingAnchor),
+    });
+  };
+
+  const applyLink = () => {
+    if (!linkModal.url.trim()) return;
+    triggerHaptic('medium');
+    const sel = window.getSelection();
+    if (savedRangeRef.current) {
+      sel?.removeAllRanges();
+      sel?.addRange(savedRangeRef.current);
+    }
+    let parentNode: Node | null = savedRangeRef.current?.commonAncestorContainer || null;
+    if (parentNode && parentNode.nodeType === Node.TEXT_NODE) {
+      parentNode = parentNode.parentNode;
+    }
+    const existingAnchor = (parentNode as HTMLElement)?.closest('a');
+    const cleanUrl = linkModal.url.trim();
+    const finalUrl = cleanUrl.startsWith('#') || cleanUrl.startsWith('http://') || cleanUrl.startsWith('https://') || cleanUrl.startsWith('tg://') || cleanUrl.startsWith('mailto:') || cleanUrl.startsWith('tel:')
+      ? cleanUrl
+      : `https://${cleanUrl}`;
+
+    if (existingAnchor) {
+      existingAnchor.setAttribute('href', finalUrl);
+      if (linkModal.text.trim()) {
+        existingAnchor.textContent = linkModal.text.trim();
+      }
+    } else if (savedRangeRef.current && !savedRangeRef.current.collapsed) {
+      const a = document.createElement('a');
+      a.href = finalUrl;
+      const content = savedRangeRef.current.extractContents();
+      a.appendChild(content);
+      savedRangeRef.current.insertNode(a);
+      sel?.removeAllRanges();
+      const nextRange = document.createRange();
+      nextRange.selectNodeContents(a);
+      sel?.addRange(nextRange);
+    } else if (savedRangeRef.current) {
+      const a = document.createElement('a');
+      a.href = finalUrl;
+      a.textContent = linkModal.text.trim() || finalUrl;
+      savedRangeRef.current.insertNode(a);
+    }
+
+    if (focusedBlockIndex !== null && currentNote.blocks[focusedBlockIndex]) {
+      const currentEl = blockElementRefs.current[currentNote.blocks[focusedBlockIndex].id];
+      const editableDiv = currentEl?.querySelector('[contenteditable]');
+      if (editableDiv) {
+        updateBlock(
+          focusedBlockIndex,
+          { ...currentNote.blocks[focusedBlockIndex], text: editableDiv.innerHTML } as ContentBlock,
+          true
+        );
+      }
+    }
+    setLinkModal((prev) => ({ ...prev, isOpen: false }));
+    savedRangeRef.current = null;
+    updateActiveFormats();
+  };
+
+  const removeLink = () => {
+    triggerHaptic('light');
+    if (savedRangeRef.current) {
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(savedRangeRef.current);
+      let parentNode: Node | null = savedRangeRef.current.commonAncestorContainer;
+      if (parentNode.nodeType === Node.TEXT_NODE) {
+        parentNode = parentNode.parentNode;
+      }
+      const existingAnchor = (parentNode as HTMLElement)?.closest('a');
+      if (existingAnchor) {
+        const parent = existingAnchor.parentNode;
+        while (existingAnchor.firstChild) {
+          parent?.insertBefore(existingAnchor.firstChild, existingAnchor);
+        }
+        parent?.removeChild(existingAnchor);
+      }
+      if (focusedBlockIndex !== null && currentNote.blocks[focusedBlockIndex]) {
+        const currentEl = blockElementRefs.current[currentNote.blocks[focusedBlockIndex].id];
+        const editableDiv = currentEl?.querySelector('[contenteditable]');
+        if (editableDiv) {
+          updateBlock(
+            focusedBlockIndex,
+            { ...currentNote.blocks[focusedBlockIndex], text: editableDiv.innerHTML } as ContentBlock,
+            true
+          );
+        }
+      }
+    }
+    setLinkModal((prev) => ({ ...prev, isOpen: false }));
+    savedRangeRef.current = null;
+    updateActiveFormats();
+  };
 
   useEffect(() => {
     const handleViewport = () => {
@@ -737,7 +889,7 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
     updateActiveFormats();
   };
 
-  const toggleCustomTag = (tagName: 'tg-spoiler' | 'code') => {
+  const toggleCustomTag = (tagName: 'tg-spoiler' | 'code' | 'mark') => {
     triggerHaptic('light');
     const sel = window.getSelection();
     if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
@@ -792,7 +944,7 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
       container = container.parentNode;
     }
     const parentEl = container as HTMLElement | null;
-    const tagsToRemove = ['TG-SPOILER', 'CODE', 'B', 'STRONG', 'I', 'EM', 'U', 'INS', 'S', 'STRIKE', 'DEL'];
+    const tagsToRemove = ['TG-SPOILER', 'CODE', 'B', 'STRONG', 'I', 'EM', 'U', 'INS', 'S', 'STRIKE', 'DEL', 'MARK', 'A'];
     tagsToRemove.forEach((tag) => {
       const el = parentEl?.closest(tag);
       if (el && range.intersectsNode(el)) {
@@ -804,7 +956,7 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
       }
     });
     if (parentEl) {
-      const descendants = parentEl.querySelectorAll('tg-spoiler, code, b, strong, i, em, u, ins, s, strike, del');
+      const descendants = parentEl.querySelectorAll('tg-spoiler, code, b, strong, i, em, u, ins, s, strike, del, mark, a');
       descendants.forEach((el) => {
         if (range.intersectsNode(el)) {
           const parent = el.parentNode;
@@ -1560,14 +1712,52 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
     triggerHaptic('light');
     setShowToc(false);
     const el = blockElementRefs.current[id];
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const container = scrollContainerRef.current;
+    if (el && container) {
+      const headerOffset = 135;
+      const elTop = el.getBoundingClientRect().top;
+      const containerTop = container.getBoundingClientRect().top;
+      const targetScrollTop = container.scrollTop + (elTop - containerTop) - headerOffset;
+      container.scrollTo({
+        top: Math.max(0, targetScrollTop),
+        behavior: 'smooth',
+      });
+      const input = el.querySelector<HTMLInputElement | HTMLElement>('input, [contenteditable="true"]');
+      if (input) {
+        setTimeout(() => {
+          input.focus();
+        }, 280);
+      }
     }
   };
 
   const headingsList = currentNote.blocks.filter(
     (b): b is Extract<ContentBlock, { type: 'heading' }> => b.type === 'heading' && b.text.trim().length > 0
   );
+
+  const insertTocIntoNote = () => {
+    if (headingsList.length === 0) return;
+    triggerHaptic('medium');
+    setShowToc(false);
+    const tocItemsHtml = headingsList
+      .map((h) => `• <a href="#chapter-${h.id}">${h.text}</a>`)
+      .join('<br/>');
+    const newBlock: ContentBlock = {
+      id: `p-toc-${Date.now()}`,
+      type: 'paragraph',
+      text: tocItemsHtml,
+    };
+    const targetPos = focusedBlockIndex !== null && focusedBlockIndex >= 0
+      ? focusedBlockIndex + 1
+      : 0;
+    const nextBlocks = [
+      ...currentNote.blocks.slice(0, targetPos),
+      newBlock,
+      ...currentNote.blocks.slice(targetPos),
+    ];
+    persistChange({ ...currentNote, blocks: nextBlocks }, true);
+    setFocusedBlockIndex(targetPos);
+  };
 
   const executeExport = async (payload: any) => {
     const result = await exportNoteToTelegram(payload);
@@ -1653,7 +1843,7 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
     }
     currentNote.blocks.forEach((b) => {
       if (b.type === 'heading') {
-        richBlocks.push({ type: 'heading', size: b.size, text: b.text });
+        richBlocks.push({ type: 'heading', size: b.size, text: b.text, id: b.id });
       } else if (b.type === 'paragraph') {
         if (b.text && b.text.trim()) {
           richBlocks.push({ type: 'paragraph', text: b.text });
@@ -2099,41 +2289,53 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
       </div>
 
       {showToc && (
-        <div className="my-2 p-3 rounded-xl bg-cream-surface border border-cream-divider animate-toc-down shadow-sm">
-          <div className="flex items-center justify-between pb-2 border-b border-cream-divider/60">
-            <span className="text-xs font-semibold text-warm-text uppercase tracking-wider">{t('toc_title')}</span>
-            <button onClick={() => setShowToc(false)} className="text-warm-muted hover:text-warm-text">
-              <span className="material-symbols-outlined text-[16px]">close</span>
-            </button>
-          </div>
-          <div className="flex flex-col gap-1.5 pt-2 max-h-48 overflow-y-auto">
-                {headingsList.length === 0 ? (
-                  <span className="text-xs text-warm-subtle italic">{t('toc_empty')}</span>
-                ) : (
-                  headingsList.map((hBlock) => {
-                    const indentStyles: Record<number, string> = {
-                      1: 'pl-1 text-[13px] font-bold text-warm-text',
-                      2: 'pl-3 text-xs font-semibold text-warm-text',
-                      3: 'pl-5 text-xs font-medium text-warm-text',
-                      4: 'pl-7 text-xs font-normal text-warm-muted',
-                      5: 'pl-9 text-[11px] font-normal text-warm-muted',
-                      6: 'pl-11 text-[11px] font-normal text-warm-subtle',
-                    };
-                    const styleClass = indentStyles[hBlock.size] || indentStyles[2];
-                    return (
-                      <button
-                        key={hBlock.id}
-                        onClick={() => scrollToHeading(hBlock.id)}
-                        className={`text-left transition-colors truncate hover:text-warm-accent ${styleClass}`}
-                      >
-                        {hBlock.text}
-                      </button>
-                    );
-                  })
-                )}
-              </div>
-        </div>
-      )}
+         <div className="my-2 p-3 rounded-xl bg-cream-surface border border-cream-divider animate-toc-down shadow-sm">
+           <div className="flex items-center justify-between pb-2 border-b border-cream-divider/60">
+             <span className="text-xs font-semibold text-warm-text uppercase tracking-wider">{t('toc_title')}</span>
+             <button onClick={() => setShowToc(false)} className="text-warm-muted hover:text-warm-text">
+               <span className="material-symbols-outlined text-[16px]">close</span>
+             </button>
+           </div>
+           <div className="flex flex-col gap-1.5 pt-2 max-h-48 overflow-y-auto">
+                 {headingsList.length === 0 ? (
+                   <span className="text-xs text-warm-subtle italic">{t('toc_empty')}</span>
+                 ) : (
+                   headingsList.map((hBlock) => {
+                     const indentStyles: Record<number, string> = {
+                       1: 'pl-1 text-[13px] font-bold text-warm-text',
+                       2: 'pl-3 text-xs font-semibold text-warm-text',
+                       3: 'pl-5 text-xs font-medium text-warm-text',
+                       4: 'pl-7 text-xs font-normal text-warm-muted',
+                       5: 'pl-9 text-[11px] font-normal text-warm-muted',
+                       6: 'pl-11 text-[11px] font-normal text-warm-subtle',
+                     };
+                     const styleClass = indentStyles[hBlock.size] || indentStyles[2];
+                     return (
+                       <button
+                         key={hBlock.id}
+                         onClick={() => scrollToHeading(hBlock.id)}
+                         className={`text-left transition-colors truncate hover:text-warm-accent ${styleClass}`}
+                       >
+                         {hBlock.text}
+                       </button>
+                     );
+                   })
+                 )}
+           </div>
+           {headingsList.length > 0 && (
+             <div className="pt-2 mt-1 border-t border-cream-divider/50 flex justify-end">
+               <button
+                 type="button"
+                 onClick={insertTocIntoNote}
+                 className="text-[11px] font-semibold text-warm-accent hover:underline flex items-center gap-1 active:opacity-70 transition-opacity"
+               >
+                 <span className="material-symbols-outlined text-[13px]">format_list_bulleted</span>
+                 <span>{t('toc_insert_button')}</span>
+               </button>
+             </div>
+           )}
+         </div>
+       )}
 
       <div className="flex flex-col pt-3">
         <textarea
@@ -2173,6 +2375,12 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                     html={block.text}
                     placeholder={t('paragraph_placeholder')}
                     onFocus={() => setFocusedBlockIndex(index)}
+                    onAnchorClick={(href) => {
+                      if (href.startsWith('#')) {
+                        const targetId = href.replace(/^#chapter-/, '').replace(/^#/, '');
+                        scrollToHeading(targetId);
+                      }
+                    }}
                     onChange={(newHtml) => updateBlock(index, { ...block, text: newHtml })}
                     onKeyDown={(e) => handleParagraphKeyDown(e, index)}
                     className="w-full text-[15px] leading-relaxed text-warm-text bg-transparent border-none focus:outline-none min-h-[24px]"
@@ -3158,108 +3366,279 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
 
       
 
-      {isEditorActive && !showExportModal && !editingButtonModal && !timePickerModal.isOpen &&
+      {isEditorActive && !showExportModal && !editingButtonModal && !timePickerModal.isOpen && !linkModal.isOpen &&
         createPortal(
           <div
             data-format-bar="true"
-            className="fixed inset-x-0 z-50 flex justify-center px-4 pointer-events-none max-w-[420px] mx-auto select-none"
+            className="fixed inset-x-0 z-50 flex justify-center px-3 pointer-events-none max-w-[420px] mx-auto select-none"
             style={{
               bottom: keyboardInset > 0
                 ? `${keyboardInset + 10}px`
                 : 'calc(max(var(--tg-content-bottom, 0px), var(--tg-safe-bottom, 0px), env(safe-area-inset-bottom, 0px)) + 12px)',
             }}
           >
-            <div className="pointer-events-auto flex items-center p-1 rounded-full bg-cream-surface border border-cream-divider shadow-xl backdrop-blur-md">
-              <button
-                onPointerDown={(e) => e.preventDefault()}
-                onClick={() => applyFormatCommand('bold')}
-                className={`flex items-center justify-center w-8 h-8 rounded-full transition-colors text-xs font-bold ${
-                  activeFormats.bold
-                    ? 'bg-warm-accent text-[#FAF8F5]'
-                    : 'text-warm-muted hover:text-warm-text active:bg-cream-divider'
-                }`}
-              >
-                B
-              </button>
-              <button
-                onPointerDown={(e) => e.preventDefault()}
-                onClick={() => applyFormatCommand('italic')}
-                className={`flex items-center justify-center w-8 h-8 rounded-full transition-colors text-xs italic font-serif ${
-                  activeFormats.italic
-                    ? 'bg-warm-accent text-[#FAF8F5]'
-                    : 'text-warm-muted hover:text-warm-text active:bg-cream-divider'
-                }`}
-              >
-                I
-              </button>
-              <button
-                onPointerDown={(e) => e.preventDefault()}
-                onClick={() => applyFormatCommand('underline')}
-                className={`flex items-center justify-center w-8 h-8 rounded-full transition-colors text-xs underline ${
-                  activeFormats.underline
-                    ? 'bg-warm-accent text-[#FAF8F5]'
-                    : 'text-warm-muted hover:text-warm-text active:bg-cream-divider'
-                }`}
-              >
-                U
-              </button>
-              <button
-                onPointerDown={(e) => e.preventDefault()}
-                onClick={() => applyFormatCommand('strikeThrough')}
-                className={`flex items-center justify-center w-8 h-8 rounded-full transition-colors text-xs line-through ${
-                  activeFormats.strike
-                    ? 'bg-warm-accent text-[#FAF8F5]'
-                    : 'text-warm-muted hover:text-warm-text active:bg-cream-divider'
-                }`}
-              >
-                S
-              </button>
-              <div className="w-[1px] h-4 bg-cream-divider mx-1" />
-              <button
-                onPointerDown={(e) => e.preventDefault()}
-                onClick={() => toggleCustomTag('code')}
-                className={`flex items-center justify-center w-8 h-8 rounded-full transition-colors text-[11px] font-mono ${
-                  activeFormats.code
-                    ? 'bg-warm-accent text-[#FAF8F5]'
-                    : 'text-warm-muted hover:text-warm-text active:bg-cream-divider'
-                }`}
-              >
-                &lt;/&gt;
-              </button>
-              <button
-                onPointerDown={(e) => e.preventDefault()}
-                onClick={() => toggleCustomTag('tg-spoiler')}
-                className={`flex items-center justify-center w-8 h-8 rounded-full transition-colors ${
-                  activeFormats.spoiler
-                    ? 'bg-warm-accent text-[#FAF8F5]'
-                    : 'text-warm-muted hover:text-warm-text active:bg-cream-divider'
-                }`}
-              >
-                <span className="material-symbols-outlined text-[17px] leading-none">
-                  visibility_off
+            <div className="pointer-events-auto flex items-center p-1 rounded-full bg-[#F5F1EB] border border-cream-divider shadow-md max-w-full overflow-hidden">
+              <div className="flex items-center gap-0.5 overflow-x-auto no-scrollbar px-0.5">
+                <div className="flex items-center gap-0.5 shrink-0">
+                  <button
+                    onPointerDown={(e) => e.preventDefault()}
+                    onClick={() => applyFormatCommand('bold')}
+                    className={`flex items-center justify-center w-7 h-7 rounded-full transition-colors text-xs font-bold shrink-0 ${
+                      activeFormats.bold
+                        ? 'bg-warm-accent text-[#FAF8F5]'
+                        : 'text-warm-muted hover:text-warm-text active:bg-cream-divider'
+                    }`}
+                  >
+                    B
+                  </button>
+                  <button
+                    onPointerDown={(e) => e.preventDefault()}
+                    onClick={() => applyFormatCommand('italic')}
+                    className={`flex items-center justify-center w-7 h-7 rounded-full transition-colors text-xs italic font-serif shrink-0 ${
+                      activeFormats.italic
+                        ? 'bg-warm-accent text-[#FAF8F5]'
+                        : 'text-warm-muted hover:text-warm-text active:bg-cream-divider'
+                    }`}
+                  >
+                    I
+                  </button>
+                  <button
+                    onPointerDown={(e) => e.preventDefault()}
+                    onClick={() => applyFormatCommand('underline')}
+                    className={`flex items-center justify-center w-7 h-7 rounded-full transition-colors text-xs underline shrink-0 ${
+                      activeFormats.underline
+                        ? 'bg-warm-accent text-[#FAF8F5]'
+                        : 'text-warm-muted hover:text-warm-text active:bg-cream-divider'
+                    }`}
+                  >
+                    U
+                  </button>
+                  <button
+                    onPointerDown={(e) => e.preventDefault()}
+                    onClick={() => applyFormatCommand('strikeThrough')}
+                    className={`flex items-center justify-center w-7 h-7 rounded-full transition-colors text-xs line-through shrink-0 ${
+                      activeFormats.strike
+                        ? 'bg-warm-accent text-[#FAF8F5]'
+                        : 'text-warm-muted hover:text-warm-text active:bg-cream-divider'
+                    }`}
+                  >
+                    S
+                  </button>
+                </div>
+
+                <div className="w-[1px] h-3.5 bg-cream-divider mx-0.5 shrink-0" />
+
+                <div className="flex items-center gap-0.5 shrink-0">
+                  <button
+                    onPointerDown={(e) => e.preventDefault()}
+                    onClick={() => toggleCustomTag('mark')}
+                    title={t('tool_mark')}
+                    className={`flex items-center justify-center w-7 h-7 rounded-full transition-colors shrink-0 ${
+                      activeFormats.mark
+                        ? 'bg-warm-accent text-[#FAF8F5]'
+                        : 'text-warm-muted hover:text-warm-text active:bg-cream-divider'
+                    }`}
+                  >
+                    <span className="material-symbols-outlined text-[15px] leading-none">
+                      border_color
+                    </span>
+                  </button>
+                  <button
+                    onPointerDown={(e) => e.preventDefault()}
+                    onClick={() => toggleCustomTag('code')}
+                    className={`flex items-center justify-center w-7 h-7 rounded-full transition-colors text-[11px] font-mono shrink-0 ${
+                      activeFormats.code
+                        ? 'bg-warm-accent text-[#FAF8F5]'
+                        : 'text-warm-muted hover:text-warm-text active:bg-cream-divider'
+                    }`}
+                  >
+                    &lt;/&gt;
+                  </button>
+                  <button
+                    onPointerDown={(e) => e.preventDefault()}
+                    onClick={() => toggleCustomTag('tg-spoiler')}
+                    className={`flex items-center justify-center w-7 h-7 rounded-full transition-colors shrink-0 ${
+                      activeFormats.spoiler
+                        ? 'bg-warm-accent text-[#FAF8F5]'
+                        : 'text-warm-muted hover:text-warm-text active:bg-cream-divider'
+                    }`}
+                  >
+                    <span className="material-symbols-outlined text-[16px] leading-none">
+                      visibility_off
+                    </span>
+                  </button>
+                </div>
+
+                <div className="w-[1px] h-3.5 bg-cream-divider mx-0.5 shrink-0" />
+
+                <div className="flex items-center gap-0.5 shrink-0">
+                  <button
+                    onPointerDown={(e) => e.preventDefault()}
+                    onClick={openLinkModal}
+                    title={t('tool_link')}
+                    className={`flex items-center justify-center w-7 h-7 rounded-full transition-colors shrink-0 ${
+                      activeFormats.link
+                        ? 'bg-warm-accent text-[#FAF8F5]'
+                        : 'text-warm-muted hover:text-warm-text active:bg-cream-divider'
+                    }`}
+                  >
+                    <span className="material-symbols-outlined text-[15px] leading-none">
+                      link
+                    </span>
+                  </button>
+                  <button
+                    onPointerDown={(e) => {
+                      e.preventDefault();
+                      openTimePicker();
+                    }}
+                    className="flex items-center justify-center w-7 h-7 rounded-full transition-colors text-warm-muted hover:text-warm-text active:bg-cream-divider shrink-0"
+                  >
+                    <span className="material-symbols-outlined text-[15px] leading-none">
+                      schedule
+                    </span>
+                  </button>
+                </div>
+
+                <div className="w-[1px] h-3.5 bg-cream-divider mx-0.5 shrink-0" />
+
+                <div className="flex items-center shrink-0">
+                  <button
+                    onPointerDown={(e) => e.preventDefault()}
+                    onClick={handleClearFormatting}
+                    className="flex items-center justify-center w-7 h-7 rounded-full transition-colors text-warm-muted hover:text-warm-text active:bg-cream-divider shrink-0"
+                  >
+                    <span className="material-symbols-outlined text-[15px] leading-none">
+                      format_clear
+                    </span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
+      {linkModal.isOpen &&
+        createPortal(
+          <div
+            data-modal="true"
+            onClick={() => setLinkModal((prev) => ({ ...prev, isOpen: false }))}
+            className="fixed inset-0 z-50 flex flex-col justify-end bg-[#24201D]/45 transition-opacity duration-150"
+          >
+            <div
+              data-modal="true"
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-[420px] mx-auto bg-[#FAF8F5] rounded-t-3xl border-t border-cream-divider px-6 pt-3 pb-6 flex flex-col gap-3.5 shadow-xl animate-sheet-up"
+              style={{
+                paddingBottom: keyboardInset > 0
+                  ? `${keyboardInset + 16}px`
+                  : 'calc(max(var(--tg-content-bottom, 0px), var(--tg-safe-bottom, 0px), env(safe-area-inset-bottom, 0px)) + 18px)',
+              }}
+            >
+              <div className="w-10 h-1 rounded-full bg-cream-divider self-center shrink-0 mb-1" />
+              <div className="flex items-center justify-between pb-1 border-b border-cream-divider/50">
+                <span className="text-xs font-semibold uppercase tracking-wider text-warm-text">
+                  {t('link_modal_title')}
                 </span>
-              </button>
-              <button
-                onPointerDown={(e) => {
-                  e.preventDefault();
-                  openTimePicker();
-                }}
-                className="flex items-center justify-center w-8 h-8 rounded-full transition-colors text-warm-muted hover:text-warm-text active:bg-cream-divider"
-              >
-                <span className="material-symbols-outlined text-[16px] leading-none">
-                  schedule
-                </span>
-              </button>
-              <div className="w-[1px] h-4 bg-cream-divider mx-1" />
-              <button
-                onPointerDown={(e) => e.preventDefault()}
-                onClick={handleClearFormatting}
-                className="flex items-center justify-center w-8 h-8 rounded-full transition-colors text-warm-muted hover:text-warm-text active:bg-cream-divider"
-              >
-                <span className="material-symbols-outlined text-[16px] leading-none">
-                  format_clear
-                </span>
-              </button>
+                <button
+                  type="button"
+                  onClick={() => setLinkModal((prev) => ({ ...prev, isOpen: false }))}
+                  className="w-6 h-6 flex items-center justify-center rounded-full text-warm-muted hover:text-warm-text"
+                >
+                  <span className="material-symbols-outlined text-[16px]">close</span>
+                </button>
+              </div>
+
+              <div className="flex flex-col gap-3">
+                <div className="flex flex-col gap-1">
+                  <label className="text-[10px] font-semibold uppercase text-warm-muted">
+                    {t('link_url_label')}
+                  </label>
+                  <input
+                    type="text"
+                    value={linkModal.url}
+                    placeholder={t('link_url_placeholder')}
+                    onChange={(e) =>
+                      setLinkModal((prev) => ({ ...prev, url: e.target.value }))
+                    }
+                    className="w-full bg-cream-surface rounded-xl px-3 py-2 text-xs text-warm-text border-none focus:outline-none font-mono"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-[10px] font-semibold uppercase text-warm-muted">
+                    {t('link_text_label')}
+                  </label>
+                  <input
+                    type="text"
+                    value={linkModal.text}
+                    placeholder={t('link_text_label')}
+                    onChange={(e) =>
+                      setLinkModal((prev) => ({ ...prev, text: e.target.value }))
+                    }
+                    className="w-full bg-cream-surface rounded-xl px-3 py-2 text-xs text-warm-text border-none focus:outline-none"
+                  />
+                </div>
+
+                {headingsList.length > 0 && (
+                  <div className="flex flex-col gap-1.5 pt-1">
+                    <span className="text-[10px] font-semibold uppercase text-warm-muted">
+                      {t('link_headings_hint')}
+                    </span>
+                    <div className="flex items-center gap-1.5 flex-wrap max-h-24 overflow-y-auto no-scrollbar">
+                      {headingsList.map((h) => (
+                        <button
+                          key={h.id}
+                          type="button"
+                          onClick={() => {
+                            triggerHaptic('light');
+                            setLinkModal((prev) => ({
+                              ...prev,
+                              url: `#chapter-${h.id}`,
+                              text: prev.text || h.text,
+                            }));
+                          }}
+                          className={`text-[10px] px-2.5 py-1 rounded-lg border transition-colors ${
+                            linkModal.url === `#chapter-${h.id}`
+                              ? 'bg-warm-accent-light border-warm-accent text-warm-accent font-semibold'
+                              : 'bg-cream-surface border-cream-divider text-warm-text hover:border-warm-subtle'
+                          }`}
+                        >
+                          #{h.text}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center justify-between gap-2 pt-2 border-t border-cream-divider/50">
+                {linkModal.isEditing ? (
+                  <button
+                    type="button"
+                    onClick={removeLink}
+                    className="px-3.5 py-1.5 rounded-full text-xs font-semibold text-red-600 bg-red-50 active:scale-95 transition-transform"
+                  >
+                    {t('link_remove')}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setLinkModal((prev) => ({ ...prev, isOpen: false }))}
+                    className="px-3.5 py-1.5 rounded-full text-xs font-semibold text-warm-muted bg-cream-surface active:scale-95 transition-transform"
+                  >
+                    {t('deselect_all')}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={applyLink}
+                  disabled={!linkModal.url.trim()}
+                  className="px-5 py-1.5 rounded-full text-xs font-semibold text-[#FAF8F5] bg-warm-accent active:scale-95 transition-transform disabled:opacity-40"
+                >
+                  {t('link_apply')}
+                </button>
+              </div>
             </div>
           </div>,
           document.body

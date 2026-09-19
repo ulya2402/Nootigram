@@ -27,20 +27,35 @@ input, textarea, [contenteditable] {
 }
 
 tg-spoiler {
-  background-color: #d1c7bc;
+  background-color: #D6CEC5;
   color: transparent;
   border-radius: 4px;
   padding: 0 4px;
   cursor: pointer;
   user-select: text;
-  filter: blur(5px);
-  transition: filter 0.15s ease, color 0.15s ease, background-color 0.15s ease;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 tg-spoiler:hover, tg-spoiler:active {
-  filter: none;
   color: inherit;
   background-color: rgba(138, 81, 34, 0.15);
+}
+
+mark {
+  background-color: #F7E4B2;
+  color: #24201D;
+  border-radius: 3px;
+  padding: 0 4px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+a {
+  color: #8A5122;
+  text-decoration: underline;
+  text-underline-offset: 2.5px;
+  text-decoration-thickness: 1px;
+  cursor: pointer;
 }
 
 code {
