@@ -23,3 +23,6 @@ Thumbs.db
 *.njsproj
 *.sln
 *.sw?
+frontend/src/locales/*
+!frontend/src/locales/en.json
+!frontend/src/locales/fa.json
