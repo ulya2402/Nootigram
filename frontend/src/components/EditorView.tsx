@@ -236,12 +236,36 @@ export const EditorView: React.FC<EditorViewProps> = ({
 
   const savedRangeRef = useRef<Range | null>(null);
 
+  const forceDismissKeyboard = () => {
+    setIsEditorActive(false);
+    const sel = window.getSelection();
+    if (sel) sel.removeAllRanges(); // Menghapus sorotan teks agar tombol "Salin" hilang
+    
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+    
+    // Trik khusus memaksa keyboard HP menutup
+    const tempInput = document.createElement('input');
+    tempInput.setAttribute('readonly', 'readonly');
+    tempInput.setAttribute('style', 'position:fixed; top:-9999px; left:-9999px; opacity:0;');
+    document.body.appendChild(tempInput);
+    tempInput.focus();
+    setTimeout(() => {
+      tempInput.blur();
+      if (document.body.contains(tempInput)) document.body.removeChild(tempInput);
+    }, 15);
+  };
+
   const openTimePicker = () => {
     triggerHaptic('light');
     const sel = window.getSelection();
     if (sel && sel.rangeCount > 0) {
       savedRangeRef.current = sel.getRangeAt(0).cloneRange();
     }
+    
+    forceDismissKeyboard(); // Panggil fungsi pemaksa tutup di sini
+    
     const now = new Date();
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -739,13 +763,9 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
     const existingAnchor = (parentNode as HTMLElement)?.closest('a');
     const linkText = existingAnchor ? (existingAnchor.textContent || '') : range.toString().trim();
     const linkHref = existingAnchor ? (existingAnchor.getAttribute('href') || '') : '';
-
-    sel.removeAllRanges();
-    if (document.activeElement instanceof HTMLElement) {
-      document.activeElement.blur();
-    }
-    setIsEditorActive(false);
-
+    
+    forceDismissKeyboard();
+    
     setLinkModal({
       isOpen: true,
       url: linkHref,
@@ -1652,10 +1672,7 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
 
   const handleOpenButtonConfig = (blockIndex: number, buttonIndex: number, btn: any) => {
     triggerHaptic('light');
-    setIsEditorActive(false);
-    if (document.activeElement instanceof HTMLElement) {
-      document.activeElement.blur();
-    }
+    forceDismissKeyboard();
     setFocusedBlockIndex(blockIndex);
     setEditingButtonModal({
       blockIndex,
@@ -2062,10 +2079,7 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
             <button
               onClick={() => {
                 triggerHaptic('light');
-                setIsEditorActive(false);
-                if (document.activeElement instanceof HTMLElement) {
-                  document.activeElement.blur();
-                }
+                forceDismissKeyboard();
                 setShowExportModal(true);
               }}
               disabled={isExporting}
@@ -3220,7 +3234,7 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                   </div>
                 )}
                 {block.type === 'footer' && (
-                  <div className="w-full my-2 flex flex-col gap-1 transition-all border-t border-cream-divider/50 pt-1.5">
+                  <div className="w-full my-2 flex flex-col gap-1 transition-all pt-1">
                     <div className="flex items-center justify-between pb-0.5">
                       <span className="text-[10px] font-semibold uppercase tracking-wider text-warm-subtle flex items-center gap-1">
                         <span className="material-symbols-outlined text-[13px]">short_text</span>
@@ -3585,35 +3599,28 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
           <div
             data-modal="true"
             onClick={() => setLinkModal((prev) => ({ ...prev, isOpen: false }))}
-            className="fixed inset-0 z-50 flex flex-col justify-end bg-[#24201D]/45 transition-opacity duration-150"
+            className="fixed inset-0 z-50 flex justify-center bg-[#FAF8F5] animate-sheet-up"
           >
             <div
-              data-modal="true"
               onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-[420px] mx-auto bg-[#FAF8F5] rounded-t-3xl border-t border-cream-divider px-6 pt-3 pb-6 flex flex-col gap-3.5 shadow-xl animate-sheet-up"
-              style={{
-                paddingBottom: keyboardInset > 0
-                  ? `${keyboardInset + 16}px`
-                  : 'calc(max(var(--tg-content-bottom, 0px), var(--tg-safe-bottom, 0px), env(safe-area-inset-bottom, 0px)) + 18px)',
-              }}
+              className="w-full max-w-[420px] h-full flex flex-col bg-[#FAF8F5]"
             >
-              <div className="w-10 h-1 rounded-full bg-cream-divider self-center shrink-0 mb-1" />
-              <div className="flex items-center justify-between pb-1 border-b border-cream-divider/50">
-                <span className="text-xs font-semibold uppercase tracking-wider text-warm-text">
+              <div className="flex items-center justify-between px-6 pt-5 pb-3 shrink-0">
+                <span className="text-sm font-semibold tracking-wide text-warm-text">
                   {t('link_modal_title')}
                 </span>
                 <button
                   type="button"
                   onClick={() => setLinkModal((prev) => ({ ...prev, isOpen: false }))}
-                  className="w-6 h-6 flex items-center justify-center rounded-full text-warm-muted hover:text-warm-text"
+                  className="w-8 h-8 flex items-center justify-center rounded-full text-warm-muted hover:bg-cream-surface transition-colors"
                 >
-                  <span className="material-symbols-outlined text-[16px]">close</span>
+                  <span className="material-symbols-outlined text-[20px]">close</span>
                 </button>
               </div>
 
-              <div className="flex flex-col gap-3">
+              <div className="flex-1 overflow-y-auto px-6 py-2 flex flex-col gap-6">
                 <div className="flex flex-col gap-1">
-                  <label className="text-[10px] font-semibold uppercase text-warm-muted">
+                  <label className="text-[10px] font-semibold uppercase tracking-widest text-warm-subtle">
                     {t('link_url_label')}
                   </label>
                   <input
@@ -3623,12 +3630,11 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                     onChange={(e) =>
                       setLinkModal((prev) => ({ ...prev, url: e.target.value }))
                     }
-                    className="w-full bg-cream-surface rounded-xl px-3 py-2 text-xs text-warm-text border-none focus:outline-none font-mono"
+                    className="w-full bg-transparent border-b border-cream-divider px-1 py-2.5 text-sm text-warm-text focus:outline-none focus:border-warm-accent transition-colors font-mono"
                   />
                 </div>
-
                 <div className="flex flex-col gap-1">
-                  <label className="text-[10px] font-semibold uppercase text-warm-muted">
+                  <label className="text-[10px] font-semibold uppercase tracking-widest text-warm-subtle">
                     {t('link_text_label')}
                   </label>
                   <input
@@ -3638,16 +3644,15 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                     onChange={(e) =>
                       setLinkModal((prev) => ({ ...prev, text: e.target.value }))
                     }
-                    className="w-full bg-cream-surface rounded-xl px-3 py-2 text-xs text-warm-text border-none focus:outline-none"
+                    className="w-full bg-transparent border-b border-cream-divider px-1 py-2.5 text-sm text-warm-text focus:outline-none focus:border-warm-accent transition-colors"
                   />
                 </div>
-
                 {headingsList.length > 0 && (
-                  <div className="flex flex-col gap-1.5 pt-1">
-                    <span className="text-[10px] font-semibold uppercase text-warm-muted">
+                  <div className="flex flex-col gap-3 pt-4">
+                    <span className="text-[10px] font-semibold uppercase tracking-widest text-warm-subtle">
                       {t('link_headings_hint')}
                     </span>
-                    <div className="flex items-center gap-1.5 flex-wrap max-h-24 overflow-y-auto no-scrollbar">
+                    <div className="flex items-center gap-2 flex-wrap">
                       {headingsList.map((h) => (
                         <button
                           key={h.id}
@@ -3660,13 +3665,13 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                               text: prev.text || h.text,
                             }));
                           }}
-                          className={`text-[10px] px-2.5 py-1 rounded-lg border transition-colors ${
+                          className={`text-[11px] px-3.5 py-1.5 rounded-full border transition-all ${
                             linkModal.url === `#chapter-${h.id}`
-                              ? 'bg-warm-accent-light border-warm-accent text-warm-accent font-semibold'
-                              : 'bg-cream-surface border-cream-divider text-warm-text hover:border-warm-subtle'
+                              ? 'bg-warm-text border-warm-text text-[#FAF8F5] font-medium'
+                              : 'bg-transparent border-cream-divider text-warm-muted hover:text-warm-text'
                           }`}
                         >
-                          #{h.text}
+                          {h.text}
                         </button>
                       ))}
                     </div>
@@ -3674,12 +3679,19 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                 )}
               </div>
 
-              <div className="flex items-center justify-between gap-2 pt-2 border-t border-cream-divider/50">
+              <div 
+                className="px-6 py-4 flex items-center justify-between gap-3 shrink-0"
+                style={{
+                  paddingBottom: keyboardInset > 0
+                    ? `${keyboardInset + 16}px`
+                    : 'calc(max(var(--tg-content-bottom, 0px), var(--tg-safe-bottom, 0px), env(safe-area-inset-bottom, 0px)) + 16px)',
+                }}
+              >
                 {linkModal.isEditing ? (
                   <button
                     type="button"
                     onClick={removeLink}
-                    className="px-3.5 py-1.5 rounded-full text-xs font-semibold text-red-600 bg-red-50 active:scale-95 transition-transform"
+                    className="px-5 py-2.5 rounded-full text-xs font-semibold text-red-600 bg-red-50 hover:bg-red-100 active:scale-95 transition-all"
                   >
                     {t('link_remove')}
                   </button>
@@ -3687,7 +3699,7 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                   <button
                     type="button"
                     onClick={() => setLinkModal((prev) => ({ ...prev, isOpen: false }))}
-                    className="px-3.5 py-1.5 rounded-full text-xs font-semibold text-warm-muted bg-cream-surface active:scale-95 transition-transform"
+                    className="px-5 py-2.5 rounded-full text-xs font-semibold text-warm-muted hover:text-warm-text active:scale-95 transition-all"
                   >
                     {t('deselect_all')}
                   </button>
@@ -3696,7 +3708,7 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                   type="button"
                   onClick={applyLink}
                   disabled={!linkModal.url.trim()}
-                  className="px-5 py-1.5 rounded-full text-xs font-semibold text-[#FAF8F5] bg-warm-accent active:scale-95 transition-transform disabled:opacity-40"
+                  className="flex-1 max-w-[200px] py-2.5 rounded-full text-sm font-semibold text-[#FAF8F5] bg-warm-accent active:scale-95 transition-all disabled:opacity-30"
                 >
                   {t('link_apply')}
                 </button>
@@ -3705,97 +3717,96 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
           </div>,
           document.body
         )}
+
       {showExportModal &&
         createPortal(
           <div
             onClick={() => {
               if (!isExporting) setShowExportModal(false);
             }}
-            className="fixed inset-0 z-50 flex flex-col justify-end bg-[#24201D]/45 transition-opacity duration-150"
+            className="fixed inset-0 z-50 flex justify-center bg-[#FAF8F5] animate-sheet-up"
           >
             <div
               onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-[420px] mx-auto bg-[#FAF8F5] rounded-t-3xl border-t border-cream-divider px-6 pt-3 flex flex-col gap-3 animate-sheet-up"
-              style={{
-                paddingBottom: 'calc(max(var(--tg-content-bottom, 0px), var(--tg-safe-bottom, 0px), env(safe-area-inset-bottom, 0px)) + 18px)',
-              }}
+              className="w-full max-w-[420px] h-full flex flex-col bg-[#FAF8F5]"
             >
-              <div className="w-10 h-1 rounded-full bg-cream-divider self-center shrink-0 mb-1" />
-
-              <div className="flex items-center justify-between pb-1">
-                <span className="text-xs font-semibold uppercase tracking-wider text-warm-text">
+              <div className="flex items-center justify-between px-6 pt-5 pb-3 shrink-0">
+                <span className="text-sm font-semibold tracking-wide text-warm-text">
                   {t('export_modal_title')}
                 </span>
                 <button
                   type="button"
                   disabled={isExporting}
                   onClick={() => setShowExportModal(false)}
-                  className="w-6 h-6 flex items-center justify-center rounded-full text-warm-muted hover:text-warm-text disabled:opacity-30"
+                  className="w-8 h-8 flex items-center justify-center rounded-full text-warm-muted hover:bg-cream-surface transition-colors disabled:opacity-30"
                 >
-                  <span className="material-symbols-outlined text-[16px]">close</span>
+                  <span className="material-symbols-outlined text-[20px]">close</span>
                 </button>
               </div>
 
-              <div className="flex flex-col gap-1 max-h-[38vh] overflow-y-auto no-scrollbar">
-                <label className="flex items-center justify-between py-2 px-2.5 rounded-xl bg-cream-surface/50 border border-cream-divider/50 cursor-pointer select-none">
-                  <div className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-[16px] text-warm-accent">send</span>
-                    <span className="text-xs font-medium text-warm-text">{t('export_private_chat')}</span>
+              <div className="flex-1 overflow-y-auto px-6 py-2 flex flex-col">
+                <label className="flex items-center justify-between py-4 border-b border-cream-divider/50 cursor-pointer select-none group">
+                  <div className="flex items-center gap-3.5">
+                    <span className="material-symbols-outlined text-[20px] text-warm-accent">send</span>
+                    <span className="text-sm text-warm-text font-medium">{t('export_private_chat')}</span>
                   </div>
                   <input
                     type="checkbox"
                     disabled={isExporting}
                     checked={sendToUserChat}
                     onChange={(e) => setSendToUserChat(e.target.checked)}
-                    className="w-4 h-4 accent-warm-accent rounded"
+                    className="w-5 h-5 accent-warm-accent rounded border-cream-divider"
                   />
                 </label>
 
-                <div className="pt-2 pb-1">
-                  <span className="text-[10px] font-semibold text-warm-muted uppercase tracking-wider">
+                <div className="pt-6 pb-2">
+                  <span className="text-[10px] font-semibold uppercase tracking-widest text-warm-subtle">
                     {t('export_select_channels')}
                   </span>
                 </div>
-
+                
                 {(!channels || channels.length === 0) ? (
-                  <div className="p-3 text-center text-[11px] text-warm-subtle italic bg-cream-surface/30 rounded-xl">
+                  <div className="py-4 text-[11px] text-warm-subtle italic">
                     {t('no_channels_hint')}
                   </div>
                 ) : (
-                  channels.map((ch) => {
-                    const isChecked = selectedExportChannels.includes(ch.id);
-                    return (
-                      <label
-                        key={ch.id}
-                        className={`flex items-center justify-between py-2 px-2.5 rounded-xl border transition-colors cursor-pointer select-none ${
-                          isChecked
-                            ? 'bg-cream-surface border-warm-accent/40'
-                            : 'bg-transparent border-cream-divider/40'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2 min-w-0 pr-2">
-                          <span className="material-symbols-outlined text-[16px] text-warm-accent">tag</span>
-                          <span className="text-xs font-medium text-warm-text truncate">{ch.title}</span>
-                        </div>
-                        <input
-                          type="checkbox"
-                          disabled={isExporting}
-                          checked={isChecked}
-                          onChange={() => toggleChannelSelection(ch.id)}
-                          className="w-4 h-4 accent-warm-accent rounded shrink-0"
-                        />
-                      </label>
-                    );
-                  })
+                  <div className="flex flex-col">
+                    {channels.map((ch) => {
+                      const isChecked = selectedExportChannels.includes(ch.id);
+                      return (
+                        <label
+                          key={ch.id}
+                          className="flex items-center justify-between py-3.5 border-b border-cream-divider/50 cursor-pointer select-none group"
+                        >
+                          <div className="flex items-center gap-3.5 min-w-0 pr-4">
+                            <span className={`material-symbols-outlined text-[18px] transition-colors ${isChecked ? 'text-warm-text' : 'text-warm-muted group-hover:text-warm-text'}`}>tag</span>
+                            <span className={`text-sm truncate transition-colors ${isChecked ? 'font-medium text-warm-text' : 'text-warm-muted group-hover:text-warm-text'}`}>{ch.title}</span>
+                          </div>
+                          <input
+                            type="checkbox"
+                            disabled={isExporting}
+                            checked={isChecked}
+                            onChange={() => toggleChannelSelection(ch.id)}
+                            className="w-5 h-5 accent-warm-accent rounded border-cream-divider shrink-0"
+                          />
+                        </label>
+                      );
+                    })}
+                  </div>
                 )}
               </div>
 
-              <div className="flex items-center justify-end gap-2 pt-2 border-t border-cream-divider/50">
+              <div 
+                className="px-6 py-4 flex items-center justify-end gap-3 shrink-0"
+                style={{
+                  paddingBottom: 'calc(max(var(--tg-content-bottom, 0px), var(--tg-safe-bottom, 0px), env(safe-area-inset-bottom, 0px)) + 16px)',
+                }}
+              >
                 <button
                   type="button"
                   disabled={isExporting}
                   onClick={() => setShowExportModal(false)}
-                  className="px-3.5 py-1.5 rounded-full text-xs font-medium text-warm-muted bg-cream-surface active:scale-95 transition-transform disabled:opacity-30"
+                  className="px-5 py-2.5 rounded-full text-xs font-semibold text-warm-muted hover:text-warm-text active:scale-95 transition-transform disabled:opacity-30"
                 >
                   {t('deselect_all')}
                 </button>
@@ -3803,11 +3814,11 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                   type="button"
                   onClick={handleExport}
                   disabled={isExporting || (!sendToUserChat && selectedExportChannels.length === 0)}
-                  className="px-4 py-1.5 rounded-full text-xs font-semibold text-[#FAF8F5] bg-warm-accent active:scale-95 transition-all disabled:opacity-30 flex items-center gap-1.5"
+                  className="px-6 py-2.5 rounded-full text-sm font-semibold text-[#FAF8F5] bg-warm-text active:scale-95 transition-all disabled:opacity-30 flex items-center gap-2"
                 >
                   {isExporting ? (
                     <>
-                      <div className="w-3 h-3 rounded-full border-[1.5px] border-white/20 border-t-white animate-spin" />
+                      <div className="w-4 h-4 rounded-full border-[2px] border-white/20 border-t-white animate-spin" />
                       <span>{t('exporting')}</span>
                     </>
                   ) : (
@@ -3819,37 +3830,35 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
           </div>,
           document.body
         )}
+
       {editingButtonModal &&
         createPortal(
           <div
             data-modal="true"
             onClick={() => setEditingButtonModal(null)}
-            className="fixed inset-0 z-50 flex flex-col justify-end bg-[#24201D]/45 transition-opacity duration-150"
+            className="fixed inset-0 z-50 flex justify-center bg-[#FAF8F5] animate-sheet-up"
           >
             <div
               data-modal="true"
               onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-[420px] mx-auto bg-[#FAF8F5] rounded-t-3xl border-t border-cream-divider px-6 pt-3 pb-6 flex flex-col gap-3.5 shadow-xl animate-sheet-up"
-              style={{
-                paddingBottom: 'calc(max(var(--tg-content-bottom, 0px), var(--tg-safe-bottom, 0px), env(safe-area-inset-bottom, 0px)) + 18px)',
-              }}
+              className="w-full max-w-[420px] h-full flex flex-col bg-[#FAF8F5]"
             >
-              <div className="w-10 h-1 rounded-full bg-cream-divider self-center shrink-0 mb-1" />
-              <div className="flex items-center justify-between pb-1 border-b border-cream-divider/50">
-                <span className="text-xs font-semibold uppercase tracking-wider text-warm-text">
+              <div className="flex items-center justify-between px-6 pt-5 pb-3 shrink-0">
+                <span className="text-sm font-semibold tracking-wide text-warm-text">
                   {t('btn_edit_title')}
                 </span>
                 <button
                   type="button"
                   onClick={() => setEditingButtonModal(null)}
-                  className="w-6 h-6 flex items-center justify-center rounded-full text-warm-muted hover:text-warm-text"
+                  className="w-8 h-8 flex items-center justify-center rounded-full text-warm-muted hover:bg-cream-surface transition-colors"
                 >
-                  <span className="material-symbols-outlined text-[16px]">close</span>
+                  <span className="material-symbols-outlined text-[20px]">close</span>
                 </button>
               </div>
-              <div className="flex flex-col gap-2.5">
+
+              <div className="flex-1 overflow-y-auto px-6 py-2 flex flex-col gap-6">
                 <div className="flex flex-col gap-1">
-                  <label className="text-[10px] font-semibold uppercase text-warm-muted">
+                  <label className="text-[10px] font-semibold uppercase tracking-widest text-warm-subtle">
                     {t('btn_text_label')}
                   </label>
                   <input
@@ -3859,58 +3868,63 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                     onChange={(e) =>
                       setEditingButtonModal({ ...editingButtonModal, text: e.target.value })
                     }
-                    className="w-full bg-cream-surface rounded-xl px-3 py-2 text-xs text-warm-text border-none focus:outline-none"
+                    className="w-full bg-transparent border-b border-cream-divider px-1 py-2.5 text-sm text-warm-text focus:outline-none focus:border-warm-accent transition-colors"
                   />
                 </div>
-                <div className="flex items-center bg-cream-surface p-1 rounded-xl gap-1">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setEditingButtonModal({ ...editingButtonModal, type: 'url' })
-                    }
-                    className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                      editingButtonModal.type === 'url'
-                        ? 'bg-[#FAF8F5] text-warm-accent shadow-xs'
-                        : 'text-warm-muted'
-                    }`}
-                  >
-                    {t('btn_type_url')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setEditingButtonModal({ ...editingButtonModal, type: 'copy_text' })
-                    }
-                    className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                      editingButtonModal.type === 'copy_text'
-                        ? 'bg-[#FAF8F5] text-warm-accent shadow-xs'
-                        : 'text-warm-muted'
-                    }`}
-                  >
-                    {t('btn_type_copy')}
-                  </button>
+                
+                <div className="flex flex-col gap-4">
+                  <div className="flex items-center bg-cream-surface/60 p-1 rounded-lg">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setEditingButtonModal({ ...editingButtonModal, type: 'url' })
+                      }
+                      className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                        editingButtonModal.type === 'url'
+                          ? 'bg-[#FAF8F5] text-warm-text shadow-sm'
+                          : 'text-warm-muted hover:text-warm-text'
+                      }`}
+                    >
+                      {t('btn_type_url')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setEditingButtonModal({ ...editingButtonModal, type: 'copy_text' })
+                      }
+                      className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                        editingButtonModal.type === 'copy_text'
+                          ? 'bg-[#FAF8F5] text-warm-text shadow-sm'
+                          : 'text-warm-muted hover:text-warm-text'
+                      }`}
+                    >
+                      {t('btn_type_copy')}
+                    </button>
+                  </div>
+                  
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[10px] font-semibold uppercase tracking-widest text-warm-subtle">
+                      {editingButtonModal.type === 'url' ? 'URL Link' : 'Copy Value'}
+                    </label>
+                    <input
+                      type="text"
+                      value={editingButtonModal.value}
+                      placeholder={
+                        editingButtonModal.type === 'url'
+                          ? t('btn_url_placeholder')
+                          : t('btn_copy_placeholder')
+                      }
+                      onChange={(e) =>
+                        setEditingButtonModal({ ...editingButtonModal, value: e.target.value })
+                      }
+                      className="w-full bg-transparent border-b border-cream-divider px-1 py-2.5 text-sm text-warm-text focus:outline-none focus:border-warm-accent transition-colors font-mono"
+                    />
+                  </div>
                 </div>
-                <div className="flex flex-col gap-1">
-                  <label className="text-[10px] font-semibold uppercase text-warm-muted">
-                    {editingButtonModal.type === 'url' ? 'URL Link' : 'Copy Value'}
-                  </label>
-                  <input
-                    type="text"
-                    value={editingButtonModal.value}
-                    placeholder={
-                      editingButtonModal.type === 'url'
-                        ? t('btn_url_placeholder')
-                        : t('btn_copy_placeholder')
-                    }
-                    onChange={(e) =>
-                      setEditingButtonModal({ ...editingButtonModal, value: e.target.value })
-                    }
-                    className="w-full bg-cream-surface rounded-xl px-3 py-2 text-xs text-warm-text border-none focus:outline-none"
-                  />
-                </div>
-                <div className="flex flex-col gap-1 pt-1">
-                  <label className="text-[10px] font-semibold uppercase text-warm-muted">Color Theme</label>
-                  <div className="grid grid-cols-4 gap-2">
+
+                <div className="flex flex-col gap-3 pt-2">
+                  <label className="text-[10px] font-semibold uppercase tracking-widest text-warm-subtle">Theme</label>
+                  <div className="flex flex-wrap gap-3">
                     {(['default', 'primary', 'success', 'danger'] as const).map((clr) => {
                       const isActive = editingButtonModal.style === clr;
                       const label = t(`btn_style_${clr}` as any);
@@ -3929,19 +3943,25 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                           onClick={() =>
                             setEditingButtonModal({ ...editingButtonModal, style: clr })
                           }
-                          className={`flex flex-col items-center gap-1 p-2 rounded-xl border transition-all ${
-                            isActive ? 'border-warm-accent bg-warm-accent-light' : 'border-transparent bg-cream-surface'
+                          className={`flex items-center gap-2 px-3 py-1.5 rounded-full border transition-all ${
+                            isActive ? 'border-warm-text bg-cream-surface' : 'border-cream-divider bg-transparent opacity-70 hover:opacity-100'
                           }`}
                         >
-                          <div className={`w-4 h-4 rounded-full ${bgClass}`} />
-                          <span className="text-[10px] font-medium text-warm-text">{label}</span>
+                          <div className={`w-3.5 h-3.5 rounded-full ${bgClass} shrink-0`} />
+                          <span className={`text-[11px] font-medium ${isActive ? 'text-warm-text' : 'text-warm-muted'}`}>{label}</span>
                         </button>
                       );
                     })}
                   </div>
                 </div>
               </div>
-              <div className="flex items-center justify-between gap-2 pt-2 border-t border-cream-divider/50">
+
+              <div 
+                className="px-6 py-4 flex items-center justify-between gap-3 shrink-0"
+                style={{
+                  paddingBottom: 'calc(max(var(--tg-content-bottom, 0px), var(--tg-safe-bottom, 0px), env(safe-area-inset-bottom, 0px)) + 16px)',
+                }}
+              >
                 <button
                   type="button"
                   onClick={() =>
@@ -3950,14 +3970,14 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                       editingButtonModal.buttonIndex
                     )
                   }
-                  className="px-3 py-1.5 rounded-full text-xs font-semibold text-red-600 bg-red-50 active:scale-95 transition-transform"
+                  className="px-5 py-2.5 rounded-full text-xs font-semibold text-red-600 bg-red-50 hover:bg-red-100 active:scale-95 transition-transform"
                 >
                   {t('btn_delete')}
                 </button>
                 <button
                   type="button"
                   onClick={saveEditedButton}
-                  className="px-5 py-1.5 rounded-full text-xs font-semibold text-[#FAF8F5] bg-warm-accent active:scale-95 transition-transform"
+                  className="flex-1 max-w-[200px] py-2.5 rounded-full text-sm font-semibold text-[#FAF8F5] bg-warm-accent active:scale-95 transition-transform"
                 >
                   {t('btn_save')}
                 </button>
@@ -3966,37 +3986,35 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
           </div>,
           document.body
         )}
+
       {timePickerModal.isOpen &&
         createPortal(
           <div
             data-modal="true"
             onClick={() => setTimePickerModal((prev) => ({ ...prev, isOpen: false }))}
-            className="fixed inset-0 z-50 flex flex-col justify-end bg-[#24201D]/45 transition-opacity duration-150"
+            className="fixed inset-0 z-50 flex justify-center bg-[#FAF8F5] animate-sheet-up"
           >
             <div
               data-modal="true"
               onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-[420px] mx-auto bg-[#FAF8F5] rounded-t-3xl border-t border-cream-divider px-6 pt-3 pb-6 flex flex-col gap-3.5 shadow-xl animate-sheet-up"
-              style={{
-                paddingBottom: 'calc(max(var(--tg-content-bottom, 0px), var(--tg-safe-bottom, 0px), env(safe-area-inset-bottom, 0px)) + 18px)',
-              }}
+              className="w-full max-w-[420px] h-full flex flex-col bg-[#FAF8F5]"
             >
-              <div className="w-10 h-1 rounded-full bg-cream-divider self-center shrink-0 mb-1" />
-              <div className="flex items-center justify-between pb-1 border-b border-cream-divider/50">
-                <span className="text-xs font-semibold uppercase tracking-wider text-warm-text">
+              <div className="flex items-center justify-between px-6 pt-5 pb-3 shrink-0">
+                <span className="text-sm font-semibold tracking-wide text-warm-text">
                   {t('time_modal_title')}
                 </span>
                 <button
                   type="button"
                   onClick={() => setTimePickerModal((prev) => ({ ...prev, isOpen: false }))}
-                  className="w-6 h-6 flex items-center justify-center rounded-full text-warm-muted hover:text-warm-text"
+                  className="w-8 h-8 flex items-center justify-center rounded-full text-warm-muted hover:bg-cream-surface transition-colors"
                 >
-                  <span className="material-symbols-outlined text-[16px]">close</span>
+                  <span className="material-symbols-outlined text-[20px]">close</span>
                 </button>
               </div>
-              <div className="flex flex-col gap-3">
-                <div className="flex flex-col gap-1">
-                  <label className="text-[10px] font-semibold uppercase text-warm-muted">
+
+              <div className="flex-1 overflow-y-auto px-6 py-2 flex flex-col gap-8">
+                <div className="flex flex-col gap-2">
+                  <label className="text-[10px] font-semibold uppercase tracking-widest text-warm-subtle">
                     {t('time_label_datetime')}
                   </label>
                   <input
@@ -4005,50 +4023,61 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                     onChange={(e) =>
                       setTimePickerModal((prev) => ({ ...prev, datetimeVal: e.target.value }))
                     }
-                    className="w-full bg-cream-surface rounded-xl px-3 py-2 text-xs text-warm-text border-none focus:outline-none font-mono"
+                    className="w-full bg-transparent border-b border-cream-divider px-1 py-2.5 text-base text-warm-text focus:outline-none focus:border-warm-accent transition-colors font-mono"
                   />
                 </div>
-                <div className="flex flex-col gap-1">
-                  <label className="text-[10px] font-semibold uppercase text-warm-muted">
+                
+                <div className="flex flex-col gap-3">
+                  <label className="text-[10px] font-semibold uppercase tracking-widest text-warm-subtle">
                     {t('time_label_format')}
                   </label>
-                  <div className="grid grid-cols-2 gap-1.5">
+                  <div className="flex flex-col">
                     {[
                       { id: 'wDT', labelKey: 'time_format_wdt' },
                       { id: 'full', labelKey: 'time_format_full' },
                       { id: 'time', labelKey: 'time_format_time_only' },
                       { id: 'rel', labelKey: 'time_format_rel' },
-                    ].map((fmt) => (
-                      <button
-                        key={fmt.id}
-                        type="button"
-                        onClick={() =>
-                          setTimePickerModal((prev) => ({ ...prev, format: fmt.id as any }))
-                        }
-                        className={`py-2 px-2 rounded-xl text-left text-[11px] font-medium border transition-colors flex flex-col gap-0.5 ${
-                          timePickerModal.format === fmt.id
-                            ? 'bg-warm-accent-light border-warm-accent text-warm-accent'
-                            : 'bg-cream-surface border-transparent text-warm-text'
-                        }`}
-                      >
-                        <span className="font-semibold">{t(fmt.labelKey as any)}</span>
-                      </button>
-                    ))}
+                    ].map((fmt) => {
+                      const isSelected = timePickerModal.format === fmt.id;
+                      return (
+                        <button
+                          key={fmt.id}
+                          type="button"
+                          onClick={() =>
+                            setTimePickerModal((prev) => ({ ...prev, format: fmt.id as any }))
+                          }
+                          className="flex items-center justify-between py-3.5 border-b border-cream-divider/50 group"
+                        >
+                          <span className={`text-sm transition-colors ${isSelected ? 'font-medium text-warm-text' : 'text-warm-muted group-hover:text-warm-text'}`}>
+                            {t(fmt.labelKey as any)}
+                          </span>
+                          <div className={`w-4 h-4 rounded-full border flex items-center justify-center transition-all ${isSelected ? 'border-warm-accent bg-warm-accent' : 'border-warm-subtle bg-transparent'}`}>
+                            {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-[#FAF8F5]" />}
+                          </div>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               </div>
-              <div className="flex items-center justify-end gap-2 pt-2 border-t border-cream-divider/50">
+
+              <div 
+                className="px-6 py-4 flex items-center justify-end gap-3 shrink-0"
+                style={{
+                  paddingBottom: 'calc(max(var(--tg-content-bottom, 0px), var(--tg-safe-bottom, 0px), env(safe-area-inset-bottom, 0px)) + 16px)',
+                }}
+              >
                 <button
                   type="button"
                   onClick={() => setTimePickerModal((prev) => ({ ...prev, isOpen: false }))}
-                  className="px-3.5 py-1.5 rounded-full text-xs font-semibold text-warm-muted bg-cream-surface active:scale-95 transition-transform"
+                  className="px-5 py-2.5 rounded-full text-xs font-semibold text-warm-muted hover:text-warm-text active:scale-95 transition-all"
                 >
                   {t('deselect_all')}
                 </button>
                 <button
                   type="button"
                   onClick={insertDynamicTime}
-                  className="px-5 py-1.5 rounded-full text-xs font-semibold text-[#FAF8F5] bg-warm-accent active:scale-95 transition-transform"
+                  className="px-6 py-2.5 rounded-full text-sm font-semibold text-[#FAF8F5] bg-warm-text active:scale-95 transition-transform"
                 >
                   {t('time_insert')}
                 </button>
@@ -4057,6 +4086,7 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
           </div>,
           document.body
         )}
+
       {botPromptModal.isOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-[#24201D]/40 animate-page-fade">
           <div className="w-full max-w-sm p-5 rounded-2xl bg-[#FAF8F5] border border-cream-divider shadow-sm flex flex-col gap-3.5">
