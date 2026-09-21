@@ -4,6 +4,7 @@ export interface Env {
   WEBAPP_URL: string;
   ENVIRONMENT?: string;
   IMGBB_API_KEYS?: string;
+  ADMIN_IDS?: string;
 }
 
   export type InputRichBlock =

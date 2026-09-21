@@ -61,6 +61,54 @@ export async function handleBotUpdate(update: TelegramUpdate, env: Env): Promise
         await telegram.sendMessage(message.chat.id, selectText, keyboard);
         return new Response('OK', { status: 200 });
       }
+
+      if (text.startsWith('/stats')) {
+        const adminIdList = (env.ADMIN_IDS || '')
+          .split(',')
+          .map((id) => id.trim())
+          .filter(Boolean);
+
+        if (adminIdList.includes(String(userId))) {
+          try {
+            const batchResults = await env.DB.batch([
+              env.DB.prepare('SELECT COUNT(*) as total FROM users'),
+              env.DB.prepare('SELECT COUNT(*) as total FROM notes'),
+              env.DB.prepare('SELECT COUNT(*) as total FROM topics'),
+              env.DB.prepare('SELECT COUNT(*) as total FROM channels'),
+              env.DB.prepare('SELECT telegram_id, first_name, username FROM users ORDER BY created_at DESC LIMIT 5'),
+            ]);
+
+            const totalUsers = (batchResults[0].results[0] as { total: number })?.total || 0;
+            const totalNotes = (batchResults[1].results[0] as { total: number })?.total || 0;
+            const totalTopics = (batchResults[2].results[0] as { total: number })?.total || 0;
+            const totalChannels = (batchResults[3].results[0] as { total: number })?.total || 0;
+            const recentUsers = (batchResults[4].results as unknown as { telegram_id: number; first_name: string; username?: string }[]) || [];
+
+            let statsMsg = `<b>📊 System Statistics</b>\n\n`;
+            statsMsg += `👥 <b>Total Users:</b> ${totalUsers}\n`;
+            statsMsg += `📝 <b>Total Notes:</b> ${totalNotes}\n`;
+            statsMsg += `📁 <b>Total Topics:</b> ${totalTopics}\n`;
+            statsMsg += `📢 <b>Connected Channels:</b> ${totalChannels}\n\n`;
+            statsMsg += `<b>Recent Users:</b>\n`;
+
+            if (recentUsers.length === 0) {
+              statsMsg += `<i>No users registered yet.</i>`;
+            } else {
+              for (const u of recentUsers) {
+                const safeName = (u.first_name || 'User').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                const uname = u.username ? `@${u.username}` : `ID: ${u.telegram_id}`;
+                statsMsg += `• ${safeName} (${uname})\n`;
+              }
+            }
+
+            await telegram.sendMessage(message.chat.id, statsMsg.trim(), undefined, 'HTML');
+          } catch (error) {
+            console.error(`STATS_QUERY_FAILED: ${(error as Error).message}`);
+            await telegram.sendMessage(message.chat.id, 'Failed to fetch statistics.');
+          }
+        }
+        return new Response('OK', { status: 200 });
+      }
     }
 
     if (update.callback_query) {
