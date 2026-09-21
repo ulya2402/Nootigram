@@ -67,6 +67,7 @@ export class TelegramService {
       .replace(/"/g, '&quot;');
   }
 
+  // >>> START FIX: PRESERVE RICH HTML LINE BREAKS (<br>) AND TELEGRAM TAGS
   private formatInlineHtml(raw: string): string {
     if (!raw) return '';
     let formatted = raw
@@ -79,22 +80,22 @@ export class TelegramService {
       .replace(/<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/gi, '$1')
       .replace(/<h[1-6][^>]*>/gi, '')
       .replace(/<\/h[1-6]>/gi, '')
-      .replace(/<div><br\s*[\/]?>\s*<\/div>/gi, '\n')
-      .replace(/<div>/gi, '\n')
+      .replace(/<div><br\s*[\/]?>\s*<\/div>/gi, '<br>')
+      .replace(/<div>/gi, '<br>')
       .replace(/<\/div>/gi, '')
       .replace(/<p>/gi, '')
-      .replace(/<\/p>/gi, '\n')
-      .replace(/\r\n|\r/g, '\n')
-      .replace(/<br\s*[\/]?>/gi, '\n')
+      .replace(/<\/p>/gi, '<br>')
+      .replace(/\r\n|\r|\n/g, '<br>')
+      .replace(/<br\s*[\/]?>/gi, '<br>')
       .replace(/&nbsp;/gi, ' ')
-      .replace(/\n{3,}/g, '\n\n')
+      .replace(/^(?:<br\s*[\/]?>)+|(?:<br\s*[\/]?>)+$/gi, '')
       .trim();
-
     const tokens = formatted.split(/(<[^>]+>)/g);
     formatted = tokens
       .map((part) => {
         if (!part) return '';
         if (part.startsWith('<') && part.endsWith('>')) {
+          if (/^<br\s*[\/]?>$/i.test(part)) return '<br>';
           if (/^<(?:b|strong)(?:\s+[^>]*)?>$/i.test(part)) return '<b>';
           if (/^<\/(?:b|strong)>$/i.test(part)) return '</b>';
           if (/^<(?:i|em)(?:\s+[^>]*)?>$/i.test(part)) return '<i>';
@@ -109,6 +110,16 @@ export class TelegramService {
           if (/^<\/tg-spoiler>$/i.test(part)) return '</tg-spoiler>';
           if (/^<mark>$/i.test(part)) return '<mark>';
           if (/^<\/mark>$/i.test(part)) return '</mark>';
+          if (/^<sub>$/i.test(part)) return '<sub>';
+          if (/^<\/sub>$/i.test(part)) return '</sub>';
+          if (/^<sup>$/i.test(part)) return '<sup>';
+          if (/^<\/sup>$/i.test(part)) return '</sup>';
+          if (/^<tg-math>$/i.test(part)) return '<tg-math>';
+          if (/^<\/tg-math>$/i.test(part)) return '</tg-math>';
+          if (/^<tg-emoji(?:\s+[^>]*)?>$/i.test(part)) return part;
+          if (/^<\/tg-emoji>$/i.test(part)) return '</tg-emoji>';
+          if (/^<tg-reference(?:\s+[^>]*)?>$/i.test(part)) return part;
+          if (/^<\/tg-reference>$/i.test(part)) return '</tg-reference>';
           if (/^<tg-time(?:\s+[^>]*)?>$/i.test(part)) return part;
           if (/^<\/tg-time>$/i.test(part)) return '</tg-time>';
           if (/^<a\s+(?:href="[^"]*"|name="[^"]*")>$/i.test(part)) return part;
@@ -121,7 +132,7 @@ export class TelegramService {
           .replace(/>/g, '&gt;');
       })
       .join('');
-    const tags = ['b', 'i', 'u', 's', 'code', 'tg-spoiler', 'a', 'tg-time', 'mark'];
+    const tags = ['b', 'i', 'u', 's', 'code', 'tg-spoiler', 'a', 'tg-time', 'mark', 'sub', 'sup', 'tg-math', 'tg-emoji', 'tg-reference'];
     for (const tag of tags) {
       const openCount = (formatted.match(new RegExp(`<${tag}(?:\\s[^>]*)?>`, 'gi')) || []).length;
       const closeCount = (formatted.match(new RegExp(`</${tag}>`, 'gi')) || []).length;
@@ -138,9 +149,9 @@ export class TelegramService {
         });
       }
     }
-
     return formatted.trim();
   }
+  // <<< END FIX: PRESERVE RICH HTML LINE BREAKS (<br>) AND TELEGRAM TAGS
 
   private buildRichHtml(richMessage: InputRichMessage): string {
     if (richMessage.html) return this.formatInlineHtml(richMessage.html);
