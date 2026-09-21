@@ -278,44 +278,78 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
       return new Response(JSON.stringify({ error: 'EXPORT_FAILED' }), { status: 500 });
     }
   }
-  if (request.method === 'POST' && path === '/api/media/catbox') {
+  if (request.method === 'POST' && path === '/api/media/supabase') {
     try {
+      const configs = (env.SUPABASE_CONFIGS || '')
+        .split(',')
+        .map((k) => k.trim())
+        .filter(Boolean);
+
+      if (configs.length === 0) {
+        console.error('SUPABASE_NOT_CONFIGURED');
+        return new Response(JSON.stringify({ error: 'SUPABASE_NOT_CONFIGURED' }), { status: 500 });
+      }
+
       const formData = await request.formData();
       const file = formData.get('file') as unknown as File | null;
+
       if (!file || typeof (file as any).arrayBuffer !== 'function') {
         return new Response(JSON.stringify({ error: 'INVALID_FILE' }), { status: 400 });
       }
+
       if (file.size > 10 * 1024 * 1024) {
         return new Response(JSON.stringify({ error: 'FILE_TOO_LARGE' }), { status: 400 });
       }
 
-      const buffer = await file.arrayBuffer();
-      const blob = new Blob([buffer], { type: file.type || 'application/octet-stream' });
-      
-      const upstreamForm = new FormData();
-      upstreamForm.append('reqtype', 'fileupload');
-      upstreamForm.append('time', '72h');
-      upstreamForm.append('fileToUpload', blob, file.name || 'upload.bin');
+      let lastError = '';
 
-      const litterboxRes = await fetch('https://litterbox.catbox.moe/resources/internals/api.php', {
-        method: 'POST',
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        },
-        body: upstreamForm,
-      });
+      for (let i = 0; i < configs.length; i++) {
+        const parts = configs[i].split('|');
+        if (parts.length !== 3) continue;
 
-      const responseUrl = (await litterboxRes.text()).trim();
-      if (!litterboxRes.ok || !responseUrl.startsWith('http')) {
-        console.error(`LITTERBOX_UPSTREAM_FAILED: status=${litterboxRes.status}, body=${responseUrl}`);
-        return new Response(JSON.stringify({ error: 'UPLOAD_FAILED' }), { status: 502 });
+        const projectUrl = parts[0].trim();
+        const secretKey = parts[1].trim();
+        const bucketName = parts[2].trim();
+
+        try {
+          const originalExt = file.name.split('.').pop() || 'bin';
+          const safeFileName = `media_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${originalExt}`;
+          const fileType = file.type || 'application/octet-stream';
+          const uploadUrl = `${projectUrl}/storage/v1/object/${bucketName}/${safeFileName}`;
+          
+          const fileBuffer = await file.arrayBuffer();
+
+          const uploadRes = await fetch(uploadUrl, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${secretKey}`,
+              apikey: secretKey,
+              'Content-Type': fileType,
+            },
+            body: fileBuffer,
+          });
+
+          const uploadData = (await uploadRes.json()) as any;
+
+          if (uploadRes.ok) {
+            const finalUrl = `${projectUrl}/storage/v1/object/public/${bucketName}/${safeFileName}`;
+            return new Response(JSON.stringify({ success: true, url: finalUrl }), {
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
+
+          lastError = uploadData.message || uploadData.error || `UPLOAD_HTTP_${uploadRes.status}`;
+          console.warn(`SUPABASE_UPLOAD_FAILED: index=${i}, error=${lastError}`);
+        } catch (err) {
+          lastError = (err as Error).message;
+          console.warn(`SUPABASE_REQ_EXCEPTION: index=${i}, error=${lastError}`);
+        }
       }
 
-      return new Response(JSON.stringify({ success: true, url: responseUrl }), {
-        headers: { 'Content-Type': 'application/json' },
-      });
+      console.error(`SUPABASE_ALL_CONFIGS_FAILED: ${lastError}`);
+      return new Response(JSON.stringify({ error: 'UPLOAD_FAILED' }), { status: 502 });
     } catch (error) {
-      console.error(`API_MEDIA_LITTERBOX_ERROR: ${(error as Error).message}`);
+      console.error(`API_MEDIA_SUPABASE_ERROR: ${(error as Error).message}`);
       return new Response(JSON.stringify({ error: 'UPLOAD_FAILED' }), { status: 500 });
     }
   }

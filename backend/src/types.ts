@@ -4,6 +4,7 @@ export interface Env {
   WEBAPP_URL: string;
   ENVIRONMENT?: string;
   IMGBB_API_KEYS?: string;
+  SUPABASE_CONFIGS?: string;
   ADMIN_IDS?: string;
 }
 

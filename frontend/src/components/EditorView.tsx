@@ -2,8 +2,8 @@ import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from
 import { createPortal } from 'react-dom';
 import { NoteItem, ContentBlock, TaskItem, TableCell, TopicItem, MediaImageItem, ChannelItem } from '../types';
 import { t } from '../services/i18n';
-import { exportNoteToTelegram, uploadToCatbox } from '../services/api';
-import { uploadToImgbb, deleteFromImgbb } from '../services/imgbb';
+import { exportNoteToTelegram, uploadMediaToBackend } from '../services/api';
+import { compressImage, deleteFromImgbb } from '../services/imgbb';
 
 interface EditorViewProps {
   note: NoteItem;
@@ -356,20 +356,20 @@ const triggerUploadDoc = () => {
 };
 
 const handleAudioFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
-  const file = e.target.files?.[0];
-  if (!file) return;
-  e.target.value = '';
-  if (file.size > 10 * 1024 * 1024) {
-    triggerHaptic('heavy');
-    window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('error');
-    alert(t('file_size_exceeded'));
-    return;
-  }
-  setIsUploadingGlobal(true);
-  setUploadingMediaType('audio');
-  try {
-    const result = await uploadToCatbox(file);
-    const newBlock: ContentBlock = {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    if (file.size > 10 * 1024 * 1024) {
+      triggerHaptic('heavy');
+      window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('error');
+      alert(t('file_size_exceeded'));
+      return;
+    }
+    setIsUploadingGlobal(true);
+    setUploadingMediaType('audio');
+    try {
+      const result = await uploadMediaToBackend(file);
+      const newBlock: ContentBlock = {
       id: `b-audio-${Date.now()}`,
       type: 'audio',
       url: result.url,
@@ -407,19 +407,19 @@ const handleAudioFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) =
 };
 
 const handleDocFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
-  const file = e.target.files?.[0];
-  if (!file) return;
-  e.target.value = '';
-  if (file.size > 10 * 1024 * 1024) {
-    triggerHaptic('heavy');
-    alert(t('file_size_exceeded'));
-    return;
-  }
-  setIsUploadingGlobal(true);
-  setUploadingMediaType('file');
-  try {
-    const result = await uploadToCatbox(file);
-    const newBlock: ContentBlock = {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    if (file.size > 10 * 1024 * 1024) {
+      triggerHaptic('heavy');
+      alert(t('file_size_exceeded'));
+      return;
+    }
+    setIsUploadingGlobal(true);
+    setUploadingMediaType('file');
+    try {
+      const result = await uploadMediaToBackend(file);
+      const newBlock: ContentBlock = {
       id: `b-doc-${Date.now()}`,
       type: 'file',
       url: result.url,
@@ -601,75 +601,82 @@ const triggerAddSecondImage = (blockIndex: number) => {
 };
 
 const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
-  const file = e.target.files?.[0];
-  if (!file) return;
-  e.target.value = '';
-
-  const targetIdx = targetMediaBlockIndexRef.current;
-  const tempImgId = `img-${Date.now()}`;
-  setIsUploadingGlobal(true);
-
-  if (targetIdx !== null && currentNote.blocks[targetIdx]?.type === 'media') {
-    setUploadingBlockId(currentNote.blocks[targetIdx].id);
-  }
-
-  try {
-    const result = await uploadToImgbb(file);
-    const newImgItem: MediaImageItem = {
-      id: tempImgId,
-      url: result.url,
-      delete_url: result.delete_url,
-    };
-
-    if (targetIdx !== null && currentNote.blocks[targetIdx]?.type === 'media') {
-      const existingBlock = currentNote.blocks[targetIdx] as Extract<ContentBlock, { type: 'media' }>;
-      const nextImages = [...existingBlock.images, newImgItem].slice(0, 2);
-      const nextBlock: ContentBlock = {
-        ...existingBlock,
-        layout: 'collage',
-        images: nextImages,
-      };
-      updateBlock(targetIdx, nextBlock, true);
-    } else {
-      const newBlockId = `b-media-${Date.now()}`;
-      const newBlock: ContentBlock = {
-        id: newBlockId,
-        type: 'media',
-        layout: 'single',
-        caption: '',
-        images: [newImgItem],
-      };
-      const trailingParagraph: ContentBlock = {
-        id: `p-${Date.now()}`,
-        type: 'paragraph',
-        text: '',
-      };
-
-      const targetPos = focusedBlockIndex !== null && focusedBlockIndex >= 0 && focusedBlockIndex < currentNote.blocks.length
-        ? focusedBlockIndex + 1
-        : currentNote.blocks.length;
-
-      const nextBlocks = [
-        ...currentNote.blocks.slice(0, targetPos),
-        newBlock,
-        trailingParagraph,
-        ...currentNote.blocks.slice(targetPos),
-      ];
-
-      persistChange({ ...currentNote, blocks: nextBlocks }, true);
-      setFocusedBlockIndex(targetPos);
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    
+    // Tambahan pembatasan ukuran maksimal 10MB untuk gambar agar aman
+    if (file.size > 10 * 1024 * 1024) {
+      triggerHaptic('heavy');
+      window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('error');
+      alert(t('file_size_exceeded'));
+      return;
     }
 
-    window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('success');
-  } catch (err) {
-    console.error(`IMAGE_UPLOAD_FAILED: ${(err as Error).message}`);
-    window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('error');
-  } finally {
-    setIsUploadingGlobal(false);
-    setUploadingBlockId(null);
-    targetMediaBlockIndexRef.current = null;
-  }
-};
+    const targetIdx = targetMediaBlockIndexRef.current;
+    const tempImgId = `img-${Date.now()}`;
+    
+    setIsUploadingGlobal(true);
+    setUploadingMediaType('image'); // INI YANG MEMBUAT ANIMASI LOADING MUNCUL
+    
+    if (targetIdx !== null && currentNote.blocks[targetIdx]?.type === 'media') {
+      setUploadingBlockId(currentNote.blocks[targetIdx].id);
+    }
+    
+    try {
+      const compressedFile = await compressImage(file, 0.75, 1440); // KOMPRESI KEMBALI AKTIF
+      const result = await uploadMediaToBackend(compressedFile);
+      const newImgItem: MediaImageItem = {
+        id: tempImgId,
+        url: result.url,
+      };
+      
+      if (targetIdx !== null && currentNote.blocks[targetIdx]?.type === 'media') {
+        const existingBlock = currentNote.blocks[targetIdx] as Extract<ContentBlock, { type: 'media' }>;
+        const nextImages = [...existingBlock.images, newImgItem].slice(0, 2);
+        const nextBlock: ContentBlock = {
+          ...existingBlock,
+          layout: 'collage',
+          images: nextImages,
+        };
+        updateBlock(targetIdx, nextBlock, true);
+      } else {
+        const newBlockId = `b-media-${Date.now()}`;
+        const newBlock: ContentBlock = {
+          id: newBlockId,
+          type: 'media',
+          layout: 'single',
+          caption: '',
+          images: [newImgItem],
+        };
+        const trailingParagraph: ContentBlock = {
+          id: `p-${Date.now()}`,
+          type: 'paragraph',
+          text: '',
+        };
+        const targetPos = focusedBlockIndex !== null && focusedBlockIndex >= 0 && focusedBlockIndex < currentNote.blocks.length
+          ? focusedBlockIndex + 1
+          : currentNote.blocks.length;
+        const nextBlocks = [
+          ...currentNote.blocks.slice(0, targetPos),
+          newBlock,
+          trailingParagraph,
+          ...currentNote.blocks.slice(targetPos),
+        ];
+        persistChange({ ...currentNote, blocks: nextBlocks }, true);
+        setFocusedBlockIndex(targetPos);
+      }
+      window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('success');
+    } catch (err) {
+      console.error(`IMAGE_UPLOAD_FAILED: ${(err as Error).message}`);
+      window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('error');
+    } finally {
+      setIsUploadingGlobal(false);
+      setUploadingMediaType(null); // MATIKAN ANIMASI LOADING SETELAH SELESAI
+      setUploadingBlockId(null);
+      targetMediaBlockIndexRef.current = null;
+    }
+  };
 
 const toggleMediaLayout = (blockIndex: number, newLayout: 'collage' | 'slideshow') => {
   triggerHaptic('light');

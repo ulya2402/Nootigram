@@ -121,10 +121,10 @@ export async function fetchChannels(): Promise<{ channels: import('../types').Ch
   }
 }
 
-export async function uploadToCatbox(file: File): Promise<{ url: string }> {
+export async function uploadMediaToBackend(file: File): Promise<{ url: string }> {
   const workerForm = new FormData();
   workerForm.append('file', file);
-  const workerRes = await fetch(`${API_BASE}/api/media/catbox`, {
+  const workerRes = await fetch(`${API_BASE}/api/media/supabase`, {
     method: 'POST',
     headers: {
       Authorization: getAuthHeader(),
@@ -134,7 +134,7 @@ export async function uploadToCatbox(file: File): Promise<{ url: string }> {
 
   if (!workerRes.ok) {
     const errJson = (await workerRes.json().catch(() => ({}))) as { error?: string };
-    console.error(`LITTERBOX_UPLOAD_FAILED: status=${workerRes.status}, error=${errJson.error}`);
+    console.error(`MEDIA_SUPABASE_UPLOAD_FAILED: status=${workerRes.status}, error=${errJson.error}`);
     throw new Error(errJson.error || 'UPLOAD_FAILED');
   }
 
