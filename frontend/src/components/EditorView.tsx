@@ -2434,7 +2434,7 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                     }}
                     onChange={(newHtml) => updateBlock(index, { ...block, text: newHtml })}
                     onKeyDown={(e) => handleParagraphKeyDown(e, index)}
-                    className="w-full text-[15px] leading-relaxed text-warm-text bg-transparent border-none focus:outline-none min-h-[24px]"
+                    className="w-full text-[15px] leading-relaxed text-warm-text bg-transparent border-none focus:outline-none min-h-[24px] py-0.5"
                   />
                 )}
 
