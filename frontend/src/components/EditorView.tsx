@@ -2568,16 +2568,17 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                 {block.type === 'list' && (
                   <div className="flex flex-col gap-1.5 py-1">
                     {block.items.map((item, itemIdx) => (
-                      <div key={item.id} className="flex items-center gap-2">
+                      <div key={item.id} className="flex items-start gap-2">
                         {block.style === 'task' ? (
                           <button
+                            type="button"
                             onClick={() => {
                               triggerHaptic();
                               const newItems = [...block.items];
                               newItems[itemIdx].is_checked = !newItems[itemIdx].is_checked;
                               updateBlock(index, { ...block, items: newItems }, true);
                             }}
-                            className={`w-4 h-4 rounded flex items-center justify-center transition-colors ${
+                            className={`w-4 h-4 rounded flex items-center justify-center transition-colors shrink-0 mt-0.5 ${
                               item.is_checked ? 'bg-[#5F7466] text-white' : 'border border-warm-subtle bg-transparent'
                             }`}
                           >
@@ -2586,18 +2587,21 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                             )}
                           </button>
                         ) : block.style === 'ordered' ? (
-                          <span className="text-xs font-mono text-warm-accent font-semibold w-4 text-center">
+                          <span className="text-xs font-mono text-warm-accent font-semibold w-4 text-center shrink-0 mt-0.5">
                             {itemIdx + 1}.
                           </span>
                         ) : (
-                          <span className="text-base text-warm-accent leading-none w-4 text-center">•</span>
+                          <span className="text-base text-warm-accent leading-none w-4 text-center shrink-0 mt-0.5">•</span>
                         )}
-
-                        <input
+                        <textarea
+                          rows={1}
                           id={item.id}
-                          type="text"
                           value={item.text}
                           placeholder={t('task_placeholder')}
+                          ref={(el) => {
+                            if (el) autoResize(el);
+                          }}
+                          onInput={(e) => autoResize(e.currentTarget)}
                           onFocus={() => setFocusedBlockIndex(index)}
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') {
@@ -2612,7 +2616,11 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                               });
                               updateBlock(index, { ...block, items: newItems }, true);
                               setTimeout(() => {
-                                document.getElementById(newTaskId)?.focus();
+                                const nextEl = document.getElementById(newTaskId) as HTMLTextAreaElement | null;
+                                if (nextEl) {
+                                  nextEl.focus();
+                                  autoResize(nextEl);
+                                }
                               }, 50);
                             } else if (e.key === 'Backspace' && item.text === '' && block.items.length > 1) {
                               e.preventDefault();
@@ -2622,23 +2630,28 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                               const prevItem = block.items[itemIdx - 1];
                               if (prevItem) {
                                 setTimeout(() => {
-                                  document.getElementById(prevItem.id)?.focus();
+                                  const prevEl = document.getElementById(prevItem.id) as HTMLTextAreaElement | null;
+                                  if (prevEl) {
+                                    prevEl.focus();
+                                    autoResize(prevEl);
+                                  }
                                 }, 50);
                               }
                             }
                           }}
                           onChange={(e) => {
                             const newItems = [...block.items];
-                            newItems[itemIdx].text = e.target.value;
+                            newItems[itemIdx].text = e.target.value.replace(/\r?\n/g, ' ');
                             updateBlock(index, { ...block, items: newItems }, false);
                           }}
-                          className={`text-sm bg-transparent border-none focus:outline-none flex-1 ${
+                          className={`text-sm bg-transparent border-none focus:outline-none flex-1 p-0 leading-5 resize-none overflow-hidden break-words w-full ${
                             item.is_checked ? 'line-through text-warm-muted' : 'text-warm-text'
                           }`}
                         />
                       </div>
                     ))}
                     <button
+                      type="button"
                       onClick={() => {
                         triggerHaptic();
                         const newTaskId = `task-${Date.now()}`;
@@ -2648,7 +2661,11 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                         ];
                         updateBlock(index, { ...block, items: newItems }, true);
                         setTimeout(() => {
-                          document.getElementById(newTaskId)?.focus();
+                          const nextEl = document.getElementById(newTaskId) as HTMLTextAreaElement | null;
+                          if (nextEl) {
+                            nextEl.focus();
+                            autoResize(nextEl);
+                          }
                         }, 50);
                       }}
                       className="text-xs text-warm-accent font-medium self-start flex items-center gap-1 mt-0.5"
@@ -2658,6 +2675,7 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                     </button>
                   </div>
                 )}
+                
                 {block.type === 'audio' && (
                   <div className="my-2.5 p-3 rounded-2xl bg-cream-surface/75 border border-cream-divider/80 flex flex-col gap-2.5 shadow-xs w-full min-w-0 transition-all">
                     <div className="flex items-center justify-between gap-2 border-b border-cream-divider/50 pb-2">
@@ -2703,13 +2721,13 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                         href={block.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center gap-2.5 min-w-0 flex-1 group/doc"
+                        className="flex items-center gap-2.5 min-w-0 flex-1 group/doc no-underline"
                       >
                         <div className="w-8 h-8 rounded-xl bg-warm-text text-[#FAF8F5] flex items-center justify-center shrink-0">
                           <span className="material-symbols-outlined text-[18px]">attachment</span>
                         </div>
                         <div className="flex flex-col min-w-0">
-                          <span className="text-xs font-semibold text-warm-text group-hover/doc:text-warm-accent truncate transition-colors">{block.name}</span>
+                          <span className="text-xs font-semibold text-warm-text group-hover/doc:text-warm-accent truncate transition-colors no-underline">{block.name}</span>
                           <span className="text-[10px] font-mono text-warm-muted">{formatFileSize(block.size)}</span>
                         </div>
                       </a>
@@ -2721,7 +2739,7 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                         <span className="material-symbols-outlined text-[15px]">close</span>
                       </button>
                     </div>
-                    <div className="border-t border-cream-divider/40 pt-1">
+                    <div className="pt-1">
                       <input
                         type="text"
                         value={block.caption || ''}
