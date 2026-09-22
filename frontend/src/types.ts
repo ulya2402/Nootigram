@@ -55,7 +55,7 @@ export type ContentBlock =
     }
   | { id: string; type: 'code'; text: string; language?: string }
   | { id: string; type: 'math'; expression: string }
-  | { id: string; type: 'details'; summary: string; text: string }
+  | { id: string; type: 'details'; summary: string; text: string; is_open?: boolean }
   | { id: string; type: 'divider' }
   | {
       id: string;

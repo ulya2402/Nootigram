@@ -53,6 +53,8 @@
   "math_placeholder": "LaTeX formula...",
   "details_summary_placeholder": "Collapsible title...",
   "details_content_placeholder": "Hidden content...",
+  "details_auto_open": "Auto Open",
+  "details_collapsed": "Collapsed",
   "tab_text": "Text",
   "tab_lists": "Lists",
   "tab_quotes": "Quotes",

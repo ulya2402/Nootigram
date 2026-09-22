@@ -236,7 +236,8 @@ export class TelegramService {
         }
       } else if (b.type === 'details') {
         const detText = (b.blocks && b.blocks[0] && 'text' in b.blocks[0] ? (b.blocks[0] as any).text : '') || (b as any).text || '';
-        html += `<details><summary>${this.formatInlineHtml(b.summary)}</summary>${this.formatInlineHtml(detText)}</details>\n\n`;
+        const openAttr = (b as any).is_open ? ' open' : '';
+        html += `<details${openAttr}><summary>${this.formatInlineHtml(b.summary)}</summary>${this.formatInlineHtml(detText)}</details>\n\n`;
       } else if (b.type === 'media') {
         const captionText = b.caption ? this.escapeText(b.caption) : '';
         const captionTag = captionText ? `<figcaption>${captionText}</figcaption>` : '';
@@ -334,7 +335,7 @@ export class TelegramService {
         });
         return `<pre>${lines.join('\n')}</pre>\n\n`;
       })
-      .replace(/<details><summary>(.*?)<\/summary>([\s\S]*?)<\/details>/gi, '<b>$1</b>\n<blockquote>$2</blockquote>\n\n')
+      .replace(/<details(?:\s+open)?><summary>(.*?)<\/summary>([\s\S]*?)<\/details>/gi, '<b>$1</b>\n<blockquote>$2</blockquote>\n\n')
       .replace(/<aside>(.*?)<\/aside>/gi, '<blockquote>$1</blockquote>\n\n')
       .replace(/<tg-math-block>(.*?)<\/tg-math-block>/gi, '<pre><code>$1</code></pre>\n\n')
       .replace(/<hr\s*[\/]?>/gi, '—\n\n')

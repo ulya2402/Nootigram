@@ -1437,7 +1437,7 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
         primaryBlock = { id: bId1, type: 'math', expression: 'E = mc^2' };
         break;
       case 'details':
-        primaryBlock = { id: bId1, type: 'details', summary: '', text: '' };
+        primaryBlock = { id: bId1, type: 'details', summary: '', text: '', is_open: false };
         break;
       case 'divider':
         primaryBlock = { id: bId1, type: 'divider' };
@@ -1946,6 +1946,7 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
           type: 'details',
           summary: b.summary,
           blocks: [{ type: 'paragraph', text: b.text }],
+          is_open: Boolean(b.is_open),
         });
       } else if (b.type === 'divider') {
         richBlocks.push({ type: 'divider' });
@@ -3153,12 +3154,12 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                 )}
 
                 {block.type === 'details' && (
-                  <div className="w-full my-2 rounded-xl border border-cream-divider/80 bg-cream-surface/40 overflow-hidden transition-all">
+                  <div className="w-full my-2 rounded-xl border border-cream-divider/80 bg-cream-surface/40 overflow-hidden transition-all duration-200">
                     <div
                       onClick={() => toggleDetails(block.id)}
-                      className="flex items-center justify-between px-3 py-2 bg-cream-surface/60 cursor-pointer select-none"
+                      className="flex items-center justify-between px-3 py-2 bg-cream-surface/60 cursor-pointer select-none gap-2"
                     >
-                      <div onClick={(e) => e.stopPropagation()} className="flex-1 min-w-0 pr-2">
+                      <div onClick={(e) => e.stopPropagation()} className="flex-1 min-w-0 pr-1">
                         <EditableBlock
                           html={block.summary}
                           placeholder={t('details_summary_placeholder')}
@@ -3172,22 +3173,42 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                           className="w-full text-xs font-semibold text-warm-text bg-transparent border-none focus:outline-none min-h-[18px]"
                         />
                       </div>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleDetails(block.id);
-                        }}
-                        className="w-5 h-5 flex items-center justify-center text-warm-muted transition-transform duration-200 shrink-0"
-                        style={{
-                          transform: openDetailsMap[block.id] !== false ? 'rotate(180deg)' : 'rotate(0deg)',
-                        }}
-                      >
-                        <span className="material-symbols-outlined text-[16px]">expand_more</span>
-                      </button>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            triggerHaptic('light');
+                            updateBlock(index, { ...block, is_open: !block.is_open }, true);
+                          }}
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-semibold flex items-center gap-1 transition-all duration-200 active:scale-95 ${
+                            block.is_open
+                              ? 'bg-warm-accent text-white shadow-xs'
+                              : 'bg-[#FAF8F5] text-warm-muted border border-cream-divider/80 hover:text-warm-text'
+                          }`}
+                        >
+                          <span className={`material-symbols-outlined text-[13px] leading-none transition-transform duration-200 ${block.is_open ? 'rotate-180' : 'rotate-0'}`}>
+                            {block.is_open ? 'unfold_more' : 'unfold_less'}
+                          </span>
+                          <span>{block.is_open ? t('details_auto_open') : t('details_collapsed')}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleDetails(block.id);
+                          }}
+                          className="w-6 h-6 flex items-center justify-center text-warm-muted hover:text-warm-text transition-transform duration-200 shrink-0"
+                          style={{
+                            transform: openDetailsMap[block.id] !== false ? 'rotate(180deg)' : 'rotate(0deg)',
+                          }}
+                        >
+                          <span className="material-symbols-outlined text-[16px]">expand_more</span>
+                        </button>
+                      </div>
                     </div>
                     <div
-                      className={`grid transition-[grid-template-rows,opacity] duration-200 ease-out ${
+                      className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out ${
                         openDetailsMap[block.id] !== false
                           ? 'grid-rows-[1fr] opacity-100'
                           : 'grid-rows-[0fr] opacity-0 pointer-events-none'
