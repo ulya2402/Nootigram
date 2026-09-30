@@ -72,6 +72,10 @@ export const App: React.FC = () => {
 
   const [userName, setUserName] = useState<string>('Teman');
   const [userPhoto, setUserPhoto] = useState<string | undefined>(undefined);
+  const [hasWriteAccess, setHasWriteAccess] = useState<boolean>(() => {
+    const cached = localStorage.getItem(getStorageKey('notigram_write_access'));
+    return cached === 'true';
+  });
   const [, startTransition] = useTransition();
   const rootRef = useRef<HTMLDivElement>(null);
   const debounceTimerRef = useRef<number | null>(null);
@@ -108,6 +112,26 @@ export const App: React.FC = () => {
     };
   }, []);
 
+  const handleProfileClick = () => {
+    triggerHaptic('light');
+    const tg = window.Telegram?.WebApp;
+    if (tg?.requestWriteAccess) {
+      tg.requestWriteAccess((allowed: boolean) => {
+        if (allowed) {
+          triggerHaptic('medium');
+          tg.HapticFeedback?.notificationOccurred('success');
+          setHasWriteAccess(true);
+          localStorage.setItem(getStorageKey('notigram_write_access'), 'true');
+        } else {
+          triggerHaptic('medium');
+          tg.HapticFeedback?.notificationOccurred('warning');
+          setHasWriteAccess(false);
+          localStorage.setItem(getStorageKey('notigram_write_access'), 'false');
+        }
+      });
+    }
+  };
+
   useEffect(() => {
     try {
       const tg = window.Telegram?.WebApp;
@@ -123,6 +147,17 @@ export const App: React.FC = () => {
         if (user) {
           setUserName(user.first_name || t('default_user_name'));
           setUserPhoto(user.photo_url);
+        }
+        if (typeof tg.requestWriteAccess === 'function') {
+          tg.requestWriteAccess((allowed: boolean) => {
+            if (allowed) {
+              setHasWriteAccess(true);
+              localStorage.setItem(getStorageKey('notigram_write_access'), 'true');
+            } else {
+              setHasWriteAccess(false);
+              localStorage.setItem(getStorageKey('notigram_write_access'), 'false');
+            }
+          });
         }
         const applyInsets = () => {
           const root = document.documentElement.style;
@@ -409,11 +444,20 @@ export const App: React.FC = () => {
                   </>
                 )}
               </div>
-              <div className="w-7 h-7 rounded-full bg-cream-surface text-warm-text font-semibold text-xs flex items-center justify-center border border-cream-divider overflow-hidden">
-                {userPhoto ? (
-                  <img src={userPhoto} alt={userName} className="w-full h-full object-cover" />
-                ) : (
-                  <span>{userName.charAt(0).toUpperCase()}</span>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={handleProfileClick}
+                  className="w-7 h-7 rounded-full bg-cream-surface text-warm-text font-semibold text-xs flex items-center justify-center border border-cream-divider overflow-hidden active:scale-95 transition-transform select-none"
+                >
+                  {userPhoto ? (
+                    <img src={userPhoto} alt={userName} className="w-full h-full object-cover" />
+                  ) : (
+                    <span>{userName.charAt(0).toUpperCase()}</span>
+                  )}
+                </button>
+                {!hasWriteAccess && (
+                  <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-amber-500 rounded-full border border-[#FAF8F5] pointer-events-none" />
                 )}
               </div>
             </div>
