@@ -1646,12 +1646,16 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
     el.style.height = `${el.scrollHeight}px`;
   };
 
-  const persistChange = (updated: NoteItem, immediateHistory: boolean = false) => {
+  const persistChange = (updated: NoteItem, immediateHistory: boolean = false, skipSync: boolean = false) => {
     const safeBlocks = updated.blocks.length === 0
       ? [{ id: `p-${Date.now()}`, type: 'paragraph', text: '' } as ContentBlock]
       : updated.blocks;
     const finalized = { ...updated, blocks: safeBlocks };
+
     setCurrentNote(finalized);
+    if (skipSync) {
+      return;
+    }
     onSave(finalized);
 
     if (immediateHistory) {
@@ -2195,7 +2199,459 @@ const [isAllBlocksSelected, setIsAllBlocksSelected] = useState<boolean>(false);
     }
   };
 
+  const [slashMenu, setSlashMenu] = useState<{
+    blockIndex: number;
+    query: string;
+    selectedIndex: number;
+  } | null>(null);
+
+  const slashCommandItems = [
+    {
+      id: 'h1',
+      shortcut: '/h1',
+      icon: 'format_h1',
+      label: `${t('tool_heading')} 1`,
+      category: t('tab_text'),
+      keywords: ['h1', 'heading1', 'title', 'judul', 'bab'],
+      disabled: false,
+      kind: 'block' as const,
+      blockType: 'heading' as const,
+      opts: { size: 1 as const },
+    },
+    {
+      id: 'h2',
+      shortcut: '/h2',
+      icon: 'format_h2',
+      label: `${t('tool_heading')} 2`,
+      category: t('tab_text'),
+      keywords: ['h2', 'heading2', 'subtitle', 'subjudul'],
+      disabled: false,
+      kind: 'block' as const,
+      blockType: 'heading' as const,
+      opts: { size: 2 as const },
+    },
+    {
+      id: 'h3',
+      shortcut: '/h3',
+      icon: 'format_h3',
+      label: `${t('tool_heading')} 3`,
+      category: t('tab_text'),
+      keywords: ['h3', 'heading3', 'sub'],
+      disabled: false,
+      kind: 'block' as const,
+      blockType: 'heading' as const,
+      opts: { size: 3 as const },
+    },
+    {
+      id: 'h4',
+      shortcut: '/h4',
+      icon: 'title',
+      label: `${t('tool_heading')} 4`,
+      category: t('tab_text'),
+      keywords: ['h4', 'heading4'],
+      disabled: false,
+      kind: 'block' as const,
+      blockType: 'heading' as const,
+      opts: { size: 4 as const },
+    },
+    {
+      id: 'task',
+      shortcut: '/todo',
+      icon: 'check_box',
+      label: t('tool_task'),
+      category: t('tab_lists'),
+      keywords: ['todo', 'task', 'check', 'checkbox', 'tugas', 'ceklis'],
+      disabled: false,
+      kind: 'block' as const,
+      blockType: 'list' as const,
+      opts: { style: 'task' as const },
+    },
+    {
+      id: 'bullet',
+      shortcut: '/list',
+      icon: 'format_list_bulleted',
+      label: t('tool_bullet'),
+      category: t('tab_lists'),
+      keywords: ['list', 'bullet', 'ul', 'poin'],
+      disabled: false,
+      kind: 'block' as const,
+      blockType: 'list' as const,
+      opts: { style: 'bullet' as const },
+    },
+    {
+      id: 'ordered',
+      shortcut: '/num',
+      icon: 'format_list_numbered',
+      label: t('tool_numbered'),
+      category: t('tab_lists'),
+      keywords: ['num', 'numbered', 'ordered', 'ol', 'angka', 'nomor'],
+      disabled: false,
+      kind: 'block' as const,
+      blockType: 'list' as const,
+      opts: { style: 'ordered' as const },
+    },
+    {
+      id: 'quote',
+      shortcut: '/quote',
+      icon: 'format_quote',
+      label: t('tool_quote_block'),
+      category: t('tab_quotes'),
+      keywords: ['quote', 'blockquote', 'kutipan'],
+      disabled: false,
+      kind: 'block' as const,
+      blockType: 'quote' as const,
+    },
+    {
+      id: 'expandable_quote',
+      shortcut: '/expand',
+      icon: 'unfold_more',
+      label: t('tool_quote_expand'),
+      category: t('tab_quotes'),
+      keywords: ['expand', 'expandable', 'lipat'],
+      disabled: false,
+      kind: 'block' as const,
+      blockType: 'expandable_quote' as const,
+    },
+    {
+      id: 'pullquote',
+      shortcut: '/pull',
+      icon: 'format_ink_highlighter',
+      label: t('tool_quote_pull'),
+      category: t('tab_quotes'),
+      keywords: ['pull', 'pullquote', 'highlight', 'sorot'],
+      disabled: false,
+      kind: 'block' as const,
+      blockType: 'pullquote' as const,
+    },
+    {
+      id: 'table',
+      shortcut: '/table',
+      icon: 'table_rows',
+      label: t('tool_table'),
+      category: t('tab_table'),
+      keywords: ['table', 'grid', 'tabel'],
+      disabled: false,
+      kind: 'block' as const,
+      blockType: 'table' as const,
+    },
+    {
+      id: 'csv',
+      shortcut: '/csv',
+      icon: 'upload_file',
+      label: t('tool_import_csv'),
+      category: t('tab_table'),
+      keywords: ['csv', 'excel', 'import', 'impor'],
+      disabled: false,
+      kind: 'action' as const,
+      actionType: 'csv' as const,
+    },
+    {
+      id: 'image',
+      shortcut: '/img',
+      icon: 'image',
+      label: t('tool_image'),
+      category: t('tab_media'),
+      keywords: ['img', 'image', 'photo', 'picture', 'gambar', 'foto'],
+      disabled: totalImageCount >= 2 || isUploadingGlobal,
+      kind: 'action' as const,
+      actionType: 'image' as const,
+    },
+    {
+      id: 'audio',
+      shortcut: '/audio',
+      icon: 'audiotrack',
+      label: t('tool_audio'),
+      category: t('tab_media'),
+      keywords: ['audio', 'music', 'voice', 'mp3', 'suara', 'musik'],
+      disabled: totalAudioCount >= 1 || isUploadingGlobal,
+      kind: 'action' as const,
+      actionType: 'audio' as const,
+    },
+    {
+      id: 'file',
+      shortcut: '/file',
+      icon: 'attach_file',
+      label: t('tool_file'),
+      category: t('tab_media'),
+      keywords: ['file', 'doc', 'document', 'pdf', 'zip', 'dokumen', 'berkas'],
+      disabled: totalFileCount >= 1 || isUploadingGlobal,
+      kind: 'action' as const,
+      actionType: 'file' as const,
+    },
+    {
+      id: 'code',
+      shortcut: '/code',
+      icon: 'code',
+      label: t('tool_code'),
+      category: t('tab_objects'),
+      keywords: ['code', 'pre', 'script', 'kode'],
+      disabled: false,
+      kind: 'block' as const,
+      blockType: 'code' as const,
+    },
+    {
+      id: 'math',
+      shortcut: '/math',
+      icon: 'functions',
+      label: t('tool_math'),
+      category: t('tab_objects'),
+      keywords: ['math', 'formula', 'latex', 'rumus'],
+      disabled: false,
+      kind: 'block' as const,
+      blockType: 'math' as const,
+    },
+    {
+      id: 'details',
+      shortcut: '/toggle',
+      icon: 'unfold_more',
+      label: t('tool_details'),
+      category: t('tab_objects'),
+      keywords: ['details', 'toggle', 'collapse', 'accordion', 'spoiler'],
+      disabled: false,
+      kind: 'block' as const,
+      blockType: 'details' as const,
+    },
+    {
+      id: 'divider',
+      shortcut: '/line',
+      icon: 'horizontal_rule',
+      label: t('tool_divider'),
+      category: t('tab_objects'),
+      keywords: ['line', 'divider', 'hr', 'garis', 'pemisah'],
+      disabled: false,
+      kind: 'block' as const,
+      blockType: 'divider' as const,
+    },
+    {
+      id: 'button_row',
+      shortcut: '/btn',
+      icon: 'smart_button',
+      label: t('tool_button'),
+      category: t('tab_objects'),
+      keywords: ['btn', 'button', 'link', 'tombol'],
+      disabled: false,
+      kind: 'block' as const,
+      blockType: 'button_row' as const,
+    },
+    {
+      id: 'footer',
+      shortcut: '/footer',
+      icon: 'short_text',
+      label: t('tool_footer'),
+      category: t('tab_objects'),
+      keywords: ['footer', 'caption', 'catatan kaki', 'penutup'],
+      disabled: false,
+      kind: 'block' as const,
+      blockType: 'footer' as const,
+    },
+    {
+      id: 'time',
+      shortcut: '/time',
+      icon: 'schedule',
+      label: t('tool_time'),
+      category: t('tab_objects'),
+      keywords: ['time', 'date', 'clock', 'timestamp', 'waktu', 'jam', 'tanggal'],
+      disabled: false,
+      kind: 'action' as const,
+      actionType: 'time' as const,
+    },
+  ];
+
+  const filteredSlashCommands = slashMenu
+    ? slashCommandItems.filter((item) => {
+        if (item.disabled) return false;
+        const q = slashMenu.query.trim().toLowerCase();
+        if (!q) return true;
+        return (
+          item.label.toLowerCase().includes(q) ||
+          item.category.toLowerCase().includes(q) ||
+          item.shortcut.slice(1).toLowerCase().includes(q) ||
+          item.keywords.some((kw) => kw.toLowerCase().includes(q))
+        );
+      })
+    : [];
+
+  const executeSlashCommand = (cmd: (typeof slashCommandItems)[number], index: number) => {
+    triggerHaptic('medium');
+    setSlashMenu(null);
+
+    const currentBlock = currentNote.blocks[index];
+    if (!currentBlock) return;
+
+    if (cmd.kind === 'action') {
+      const currentEl = blockElementRefs.current[currentBlock.id];
+      const editableDiv = currentEl?.querySelector<HTMLElement>('[contenteditable="true"]');
+      if (editableDiv) {
+        editableDiv.innerHTML = '';
+      }
+      updateBlock(index, { ...currentBlock, text: '' } as ContentBlock, false, true);
+      setFocusedBlockIndex(index);
+
+      if (cmd.actionType === 'image') {
+        triggerUploadNewImage();
+      } else if (cmd.actionType === 'audio') {
+        triggerUploadAudio();
+      } else if (cmd.actionType === 'file') {
+        triggerUploadDoc();
+      } else if (cmd.actionType === 'csv') {
+        triggerImportCsv();
+      } else if (cmd.actionType === 'time') {
+        if (editableDiv) {
+          setCaretToStart(editableDiv);
+        }
+        openTimePicker();
+      }
+      return;
+    }
+
+    const bId1 = `b-${Date.now()}-1`;
+    const bId2 = `b-${Date.now()}-2`;
+    let primaryBlock: ContentBlock;
+
+    switch (cmd.blockType) {
+      case 'heading':
+        primaryBlock = { id: bId1, type: 'heading', size: cmd.opts?.size || 2, text: '' };
+        break;
+      case 'list':
+        primaryBlock = {
+          id: bId1,
+          type: 'list',
+          style: cmd.opts?.style || 'task',
+          items: [{ id: `task-${Date.now()}`, text: '', is_checked: false }],
+        };
+        break;
+      case 'quote':
+        primaryBlock = { id: bId1, type: 'quote', text: '', credit: '' };
+        break;
+      case 'expandable_quote':
+        primaryBlock = { id: bId1, type: 'expandable_quote', text: '', credit: '' };
+        break;
+      case 'pullquote':
+        primaryBlock = { id: bId1, type: 'pullquote', text: '', credit: '' };
+        break;
+      case 'table':
+        primaryBlock = {
+          id: bId1,
+          type: 'table',
+          is_bordered: true,
+          is_striped: false,
+          cells: [
+            [
+              { text: 'A', is_header: true, align: 'left' },
+              { text: 'B', is_header: true, align: 'left' },
+            ],
+            [
+              { text: '', align: 'left' },
+              { text: '', align: 'left' },
+            ],
+          ],
+        };
+        break;
+      case 'code':
+        primaryBlock = { id: bId1, type: 'code', text: '', language: 'javascript' };
+        break;
+      case 'math':
+        primaryBlock = { id: bId1, type: 'math', expression: 'E = mc^2' };
+        break;
+      case 'details':
+        primaryBlock = { id: bId1, type: 'details', summary: '', text: '', is_open: false };
+        break;
+      case 'divider':
+        primaryBlock = { id: bId1, type: 'divider' };
+        break;
+      case 'button_row':
+        primaryBlock = {
+          id: bId1,
+          type: 'button_row',
+          align: 'center',
+          full_width: false,
+          buttons: [
+            {
+              id: `btn-${Date.now()}`,
+              text: t('btn_default_label'),
+              style: 'primary',
+              type: 'url',
+              value: 'https://t.me',
+            },
+          ],
+        };
+        break;
+      case 'footer':
+        primaryBlock = { id: bId1, type: 'footer', text: '' };
+        break;
+      default:
+        primaryBlock = { id: bId1, type: 'paragraph', text: '' };
+        break;
+    }
+
+    const needsTrailing =
+      index === currentNote.blocks.length - 1 &&
+      ['table', 'code', 'math', 'details', 'divider', 'button_row'].includes(primaryBlock.type);
+
+    const replacementBlocks: ContentBlock[] = needsTrailing
+      ? [primaryBlock, { id: bId2, type: 'paragraph', text: '' }]
+      : [primaryBlock];
+
+    captureFlipPositions();
+    const nextBlocks = [
+      ...currentNote.blocks.slice(0, index),
+      ...replacementBlocks,
+      ...currentNote.blocks.slice(index + 1),
+    ];
+
+    persistChange({ ...currentNote, blocks: nextBlocks }, true);
+    setFocusedBlockIndex(index);
+
+    setTimeout(() => {
+      const targetEl = blockElementRefs.current[bId1];
+      if (!targetEl) return;
+      targetEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      const focusable = targetEl.querySelector<HTMLElement>('textarea, input[type="text"], [contenteditable="true"]');
+      if (focusable) {
+        focusable.focus();
+      }
+    }, 45);
+  };
+
   const handleParagraphKeyDown = (e: React.KeyboardEvent<HTMLDivElement>, index: number) => {
+    if (slashMenu && slashMenu.blockIndex === index && filteredSlashCommands.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSlashMenu((prev) =>
+          prev
+            ? { ...prev, selectedIndex: (prev.selectedIndex + 1) % filteredSlashCommands.length }
+            : null
+        );
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSlashMenu((prev) =>
+          prev
+            ? {
+                ...prev,
+                selectedIndex:
+                  (prev.selectedIndex - 1 + filteredSlashCommands.length) % filteredSlashCommands.length,
+              }
+            : null
+        );
+        return;
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        const chosen = filteredSlashCommands[slashMenu.selectedIndex] || filteredSlashCommands[0];
+        if (chosen) {
+          executeSlashCommand(chosen, index);
+        }
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setSlashMenu(null);
+        return;
+      }
+    }
+
     if (e.key !== 'Enter') {
       lastEnterRef.current = null;
     }
@@ -2221,6 +2677,7 @@ const [isAllBlocksSelected, setIsAllBlocksSelected] = useState<boolean>(false);
 
       const leftHtml = tempLeft.innerHTML;
       const rightHtml = tempRight.innerHTML;
+
       const isConsecutive = lastEnterRef.current?.index === index;
       const leftEndsWithBr = /(?:<br\s*[\/]?>|<div>(?:\s|<br\s*[\/]?>)*<\/div>|\s)+$/i.test(leftHtml);
 
@@ -2270,6 +2727,7 @@ const [isAllBlocksSelected, setIsAllBlocksSelected] = useState<boolean>(false);
 
       if (isBlockEmpty || isAtCaretStart) {
         e.preventDefault();
+        setSlashMenu(null);
         handleParagraphMerge(index, isBlockEmpty ? '' : el.innerHTML);
       }
     }
@@ -2279,10 +2737,10 @@ const [isAllBlocksSelected, setIsAllBlocksSelected] = useState<boolean>(false);
     persistChange({ ...currentNote, title }, false);
   };
 
-  const updateBlock = (index: number, newBlock: ContentBlock, immediateHistory: boolean = false) => {
+  const updateBlock = (index: number, newBlock: ContentBlock, immediateHistory: boolean = false, skipSync: boolean = false) => {
     const nextBlocks = [...currentNote.blocks];
     nextBlocks[index] = newBlock;
-    persistChange({ ...currentNote, blocks: nextBlocks }, immediateHistory);
+    persistChange({ ...currentNote, blocks: nextBlocks }, immediateHistory, skipSync);
   };
 
 
@@ -3384,28 +3842,101 @@ const [isAllBlocksSelected, setIsAllBlocksSelected] = useState<boolean>(false);
             >
               <div className="flex-1 min-w-0 w-full">
                 {block.type === 'paragraph' && (
-                  <EditableBlock
-                    html={block.text}
-                    placeholder={t('paragraph_placeholder')}
-                    onFocus={() => {
-                      setIsAllBlocksSelected(false);
-                      singleBlockSelectedRef.current = { blockIndex: null, time: 0 };
-                      setFocusedBlockIndex(index);
-                    }}
-                    onAnchorClick={(href) => {
-                      if (href.startsWith('#')) {
-                        const targetId = href.replace(/^#chapter-/, '').replace(/^#/, '');
-                        scrollToHeading(targetId);
-                      }
-                    }}
-                    onChange={(newHtml) => {
-                      singleBlockSelectedRef.current = { blockIndex: null, time: 0 };
-                      updateBlock(index, { ...block, text: newHtml });
-                    }}
-                    onKeyDown={(e) => handleParagraphKeyDown(e, index)}
-                    onSmartPasteBlocks={(pastedBlocks) => handleSmartPasteBlocks(index, pastedBlocks)}
-                    className="w-full text-[15px] leading-relaxed text-warm-text bg-transparent border-none focus:outline-none min-h-[24px] py-0.5"
-                  />
+                  <div className="relative w-full">
+                    <EditableBlock
+                      html={block.text}
+                      placeholder={t('paragraph_placeholder')}
+                      onFocus={() => {
+                        setIsAllBlocksSelected(false);
+                        singleBlockSelectedRef.current = { blockIndex: null, time: 0 };
+                        setFocusedBlockIndex(index);
+                        if (slashMenu && slashMenu.blockIndex !== index) {
+                          setSlashMenu(null);
+                        }
+                      }}
+                      onAnchorClick={(href) => {
+                        if (href.startsWith('#')) {
+                          const targetId = href.replace(/^#chapter-/, '').replace(/^#/, '');
+                          scrollToHeading(targetId);
+                        }
+                      }}
+                      onChange={(newHtml) => {
+                        singleBlockSelectedRef.current = { blockIndex: null, time: 0 };
+                        const plainSlash = newHtml
+                          .replace(/<br\s*[\/]?>/gi, '\n')
+                          .replace(/<[^>]*>/g, '')
+                          .replace(/&nbsp;/gi, ' ')
+                          .replace(/[\u200B-\u200D\uFEFF]/g, '')
+                          .trim();
+                        const slashMatch = plainSlash.match(/^\/([^\s/]{0,24})$/);
+                        const wasInSlashMenu = slashMenu?.blockIndex === index;
+                        if (slashMatch) {
+                          setSlashMenu({
+                            blockIndex: index,
+                            query: slashMatch[1].toLowerCase(),
+                            selectedIndex: 0,
+                          });
+                        } else if (wasInSlashMenu) {
+                          setSlashMenu(null);
+                        }
+                        const isTransientSlash = Boolean(slashMatch) || (wasInSlashMenu && plainSlash === '');
+                        updateBlock(index, { ...block, text: newHtml }, false, isTransientSlash);
+                      }}
+                      onKeyDown={(e) => handleParagraphKeyDown(e, index)}
+                      onSmartPasteBlocks={(pastedBlocks) => {
+                        setSlashMenu(null);
+                        handleSmartPasteBlocks(index, pastedBlocks);
+                      }}
+                      className="w-full text-[15px] leading-relaxed text-warm-text bg-transparent border-none focus:outline-none min-h-[24px] py-0.5"
+                    />
+
+                    {slashMenu && slashMenu.blockIndex === index && filteredSlashCommands.length > 0 && (
+                      <div className="mt-1.5 w-full max-w-[300px] max-h-52 overflow-y-auto no-scrollbar overscroll-contain bg-[#FAF8F5] border border-cream-divider rounded-2xl shadow-md p-1 z-30 animate-toc-down flex flex-col gap-0.5 select-none">
+                        {filteredSlashCommands.map((cmd, cmdIdx) => {
+                          const isSelected = cmdIdx === slashMenu.selectedIndex;
+                          return (
+                            <button
+                              key={cmd.id}
+                              type="button"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onPointerDown={(e) => e.preventDefault()}
+                              onClick={() => executeSlashCommand(cmd, index)}
+                              className={`w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-xl text-left transition-colors shrink-0 ${
+                                isSelected
+                                  ? 'bg-cream-surface text-warm-accent'
+                                  : 'text-warm-text hover:bg-cream-surface/60 active:bg-cream-surface'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <div
+                                  className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
+                                    isSelected
+                                      ? 'bg-warm-accent text-[#FAF8F5]'
+                                      : 'bg-cream-surface text-warm-accent'
+                                  }`}
+                                >
+                                  <span className="material-symbols-outlined text-[16px] leading-none">
+                                    {cmd.icon}
+                                  </span>
+                                </div>
+                                <div className="flex flex-col min-w-0">
+                                  <span className="text-xs font-semibold truncate leading-tight">
+                                    {cmd.label}
+                                  </span>
+                                  <span className="text-[10px] text-warm-muted truncate leading-tight">
+                                    {cmd.category}
+                                  </span>
+                                </div>
+                              </div>
+                              <span className="text-[10px] font-mono text-warm-subtle shrink-0">
+                                {cmd.shortcut}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 )}
 
                 {block.type === 'heading' && (

@@ -156,5 +156,6 @@
   "time_format_rel": "Relative Duration",
   "time_insert": "Insert",
   "lang_modal_title": "Choose Language",
-  "select_language": "Language"
+  "select_language": "Language",
+  "tool_heading": "Heading"
 }
