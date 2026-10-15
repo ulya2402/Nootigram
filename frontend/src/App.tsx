@@ -272,6 +272,32 @@ export const App: React.FC = () => {
     }, 1200);
   };
 
+  const handleDuplicateNote = (note: NoteItem) => {
+    triggerHaptic('medium');
+    const nowTs = Date.now();
+    const clonedBlocks = JSON.parse(JSON.stringify(note.blocks)).map((b: any, idx: number) => ({
+      ...b,
+      id: `b-dup-${nowTs}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
+    }));
+    const duplicatedNote: NoteItem = {
+      ...note,
+      id: `note-${nowTs}`,
+      title: note.title ? `${note.title} (Copy)` : '',
+      blocks: clonedBlocks,
+      updated_at_str: new Date().toISOString(),
+    };
+    const nextNotes = [duplicatedNote, ...notes];
+    setNotes(nextNotes);
+    localStorage.setItem(getStorageKey('notigram_user_notes'), JSON.stringify(nextNotes));
+    pendingNotesRef.current.set(duplicatedNote.id, duplicatedNote);
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    debounceTimerRef.current = window.setTimeout(() => {
+      flushPendingSync();
+    }, 600);
+  };
+
   const handleDeleteNote = (id: string) => {
     const target = notes.find((n) => n.id === id);
     if (target) {
@@ -488,6 +514,7 @@ export const App: React.FC = () => {
                 onOpenNote={handleOpenNote}
                 onToggleFavorite={handleToggleFavorite}
                 onDeleteNote={handleDeleteNote}
+                onDuplicateNote={handleDuplicateNote}
                 onBatchDeleteNotes={handleBatchDeleteNotes}
                 onOpenChannels={() => setActiveTab('channels')}
               />

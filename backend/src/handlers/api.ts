@@ -1,10 +1,91 @@
 import { Env, NotePayload, TopicPayload } from '../types';
 import { TelegramService } from '../services/telegram';
 
+function maskSupabaseUrlsInJson(rawJson: string, origin: string, supabaseConfigs?: string): string {
+  if (!rawJson || !supabaseConfigs) return rawJson;
+  const configs = supabaseConfigs
+    .split(',')
+    .map((k) => k.trim())
+    .filter(Boolean);
+  let masked = rawJson;
+  for (let i = 0; i < configs.length; i++) {
+    const parts = configs[i].split('|');
+    if (parts.length !== 3) continue;
+    const projectUrl = parts[0].trim();
+    const bucketName = parts[2].trim();
+    const publicPrefix = `${projectUrl}/storage/v1/object/public/${bucketName}/`;
+    const proxyPrefix = `${origin}/api/media/file/${i}/`;
+    if (masked.includes(publicPrefix)) {
+      masked = masked.split(publicPrefix).join(proxyPrefix);
+    }
+  }
+  return masked;
+}
+
 export async function handleApiRequest(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname;
   const telegram = new TelegramService(env.TELEGRAM_BOT_TOKEN);
+
+  if (request.method === 'GET' && path.startsWith('/api/media/file/')) {
+    const prefix = '/api/media/file/';
+    const rest = path.slice(prefix.length);
+    const slashIdx = rest.indexOf('/');
+    if (slashIdx === -1) {
+      return new Response(JSON.stringify({ error: 'INVALID_FILE' }), { status: 400 });
+    }
+    const configIndex = parseInt(rest.slice(0, slashIdx), 10);
+    const fileName = decodeURIComponent(rest.slice(slashIdx + 1));
+    if (isNaN(configIndex) || !fileName || fileName.includes('..') || fileName.includes('/')) {
+      return new Response(JSON.stringify({ error: 'INVALID_FILE' }), { status: 400 });
+    }
+    const configs = (env.SUPABASE_CONFIGS || '')
+      .split(',')
+      .map((k) => k.trim())
+      .filter(Boolean);
+    if (configIndex < 0 || configIndex >= configs.length) {
+      return new Response(JSON.stringify({ error: 'NOT_FOUND' }), { status: 404 });
+    }
+    const parts = configs[configIndex].split('|');
+    if (parts.length !== 3) {
+      return new Response(JSON.stringify({ error: 'SUPABASE_NOT_CONFIGURED' }), { status: 500 });
+    }
+    const cache = caches.default;
+    const cacheKey = new Request(url.toString(), { method: 'GET' });
+    const cachedRes = await cache.match(cacheKey);
+    if (cachedRes) {
+      return cachedRes;
+    }
+    const projectUrl = parts[0].trim();
+    const secretKey = parts[1].trim();
+    const bucketName = parts[2].trim();
+    const targetUrl = `${projectUrl}/storage/v1/object/public/${bucketName}/${fileName}`;
+    try {
+      const upstreamRes = await fetch(targetUrl, {
+        headers: {
+          Authorization: `Bearer ${secretKey}`,
+          apikey: secretKey,
+        },
+      });
+      if (!upstreamRes.ok) {
+        console.error(`MEDIA_PROXY_UPSTREAM_ERROR: status=${upstreamRes.status}, file=${fileName}`);
+        return new Response(JSON.stringify({ error: 'NOT_FOUND' }), { status: 404 });
+      }
+      const responseHeaders = new Headers();
+      responseHeaders.set('Content-Type', upstreamRes.headers.get('Content-Type') || 'application/octet-stream');
+      responseHeaders.set('Cache-Control', 'public, max-age=31536000, immutable');
+      responseHeaders.set('Access-Control-Allow-Origin', '*');
+      const proxiedRes = new Response(upstreamRes.body, {
+        status: 200,
+        headers: responseHeaders,
+      });
+      await cache.put(cacheKey, proxiedRes.clone());
+      return proxiedRes;
+    } catch (error) {
+      console.error(`MEDIA_PROXY_EXCEPTION: ${(error as Error).message}`);
+      return new Response(JSON.stringify({ error: 'INTERNAL_SERVER_ERROR' }), { status: 500 });
+    }
+  }
 
   const authHeader = request.headers.get('Authorization') || '';
   const initData = authHeader.replace(/^TelegramInitData\s+/, '');
@@ -56,16 +137,19 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
         ];
       }
 
-      const notes = rawNotes.map((r) => ({
-        id: r.id,
-        category: r.category,
-        title: r.title,
-        content_raw: r.content_raw,
-        blocks: JSON.parse(r.blocks_json),
-        is_pinned: Boolean(r.is_pinned),
-        is_favorite: Boolean(r.is_pinned),
-        updated_at_str: r.updated_at,
-      }));
+      const notes = rawNotes.map((r) => {
+        const maskedBlocksJson = maskSupabaseUrlsInJson(r.blocks_json, url.origin, env.SUPABASE_CONFIGS);
+        return {
+          id: r.id,
+          category: r.category,
+          title: r.title,
+          content_raw: r.content_raw,
+          blocks: JSON.parse(maskedBlocksJson),
+          is_pinned: Boolean(r.is_pinned),
+          is_favorite: Boolean(r.is_pinned),
+          updated_at_str: r.updated_at,
+        };
+      });
 
       return new Response(
         JSON.stringify({
@@ -332,7 +416,8 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
           const uploadData = (await uploadRes.json()) as any;
 
           if (uploadRes.ok) {
-            const finalUrl = `${projectUrl}/storage/v1/object/public/${bucketName}/${safeFileName}`;
+            const finalUrl = `${url.origin}/api/media/file/${i}/${safeFileName}`;
+            console.log(`SUPABASE_UPLOAD_PROXY_SUCCESS: index=${i}, file=${safeFileName}`);
             return new Response(JSON.stringify({ success: true, url: finalUrl }), {
               headers: { 'Content-Type': 'application/json' },
             });

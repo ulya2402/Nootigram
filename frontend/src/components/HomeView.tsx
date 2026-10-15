@@ -10,6 +10,7 @@ interface HomeViewProps {
   onOpenNote: (note: NoteItem) => void;
   onToggleFavorite: (id: string, e: React.MouseEvent) => void;
   onDeleteNote: (id: string) => void;
+  onDuplicateNote?: (note: NoteItem) => void;
   onBatchDeleteNotes: (ids: string[]) => void;
   onOpenChannels?: () => void;
 }
@@ -36,6 +37,132 @@ function getNoteMedia(note: NoteItem): { url: string; count: number } | null {
   return null;
 }
 
+function inlineHtmlToTelegramMarkdown(rawHtml: string): string {
+  if (!rawHtml) return '';
+  let text = rawHtml
+    .replace(/<tg-time\s+unix="([^"]+)"(?:\s+format="([^"]+)")?[^>]*>([\s\S]*?)<\/tg-time>/gi, (_, unix, fmt, label) => {
+      const fmtQuery = fmt ? `&format=${fmt}` : '';
+      return `![${label}](tg://time?unix=${unix}${fmtQuery})`;
+    })
+    .replace(/<tg-emoji\s+emoji-id="([^"]+)"[^>]*>([\s\S]*?)<\/tg-emoji>/gi, '![$2](tg://emoji?id=$1)')
+    .replace(/<a\s+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi, '[$2]($1)')
+    .replace(/<(?:b|strong)(?:\s+[^>]*)?>([\s\S]*?)<\/(?:b|strong)>/gi, '**$1**')
+    .replace(/<(?:i|em)(?:\s+[^>]*)?>([\s\S]*?)<\/(?:i|em)>/gi, '*$1*')
+    .replace(/<(?:s|strike|del)(?:\s+[^>]*)?>([\s\S]*?)<\/(?:s|strike|del)>/gi, '~~$1~~')
+    .replace(/<code>([\s\S]*?)<\/code>/gi, '`$1`')
+    .replace(/<mark>([\s\S]*?)<\/mark>/gi, '==$1==')
+    .replace(/<tg-spoiler>([\s\S]*?)<\/tg-spoiler>/gi, '||$1||')
+    .replace(/<tg-math>([\s\S]*?)<\/tg-math>/gi, '$$$1$$')
+    .replace(/<div><br\s*[\/]?>\s*<\/div>/gi, '\n')
+    .replace(/<div>/gi, '\n')
+    .replace(/<\/div>/gi, '')
+    .replace(/<br\s*[\/]?>/gi, '\n')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&amp;/gi, '&');
+  return text.trim();
+}
+
+function convertNoteToTelegramMarkdown(note: NoteItem): string {
+  const parts: string[] = [];
+  if (note.title && note.title.trim()) {
+    parts.push(`# ${note.title.trim()}`);
+  }
+  for (const block of note.blocks) {
+    if (block.type === 'heading') {
+      const hashes = '#'.repeat(Math.min(6, Math.max(1, block.size || 2)));
+      if (block.text.trim()) {
+        parts.push(`${hashes}${block.text.trim()}`);
+      }
+    } else if (block.type === 'paragraph') {
+      const md = inlineHtmlToTelegramMarkdown(block.text);
+      if (md) {
+        parts.push(md);
+      }
+    } else if (block.type === 'list') {
+      const lines = block.items.map((item, idx) => {
+        const itemText = inlineHtmlToTelegramMarkdown(item.text);
+        if (block.style === 'task') {
+          return `- [${item.is_checked ? 'x' : ' '}] ${itemText}`;
+        }
+        if (block.style === 'ordered') {
+          return `${idx + 1}.${itemText}`;
+        }
+        return `- ${itemText}`;
+      });
+      if (lines.length > 0) {
+        parts.push(lines.join('\n'));
+      }
+    } else if (block.type === 'quote') {
+      const quoteMd = inlineHtmlToTelegramMarkdown(block.text);
+      const quoteLines = quoteMd.split('\n').map((l) => `>${l}`);
+      if (block.credit && block.credit.trim()) {
+        quoteLines.push(`>— ${block.credit.trim()}`);
+      }
+      parts.push(quoteLines.join('\n'));
+    } else if (block.type === 'expandable_quote') {
+      const quoteMd = inlineHtmlToTelegramMarkdown(block.text).replace(/\n/g, '<br>');
+      const citeTag = block.credit && block.credit.trim() ? `<cite>${block.credit.trim()}</cite>` : '';
+      parts.push(`<blockquote expandable>${quoteMd}${citeTag}</blockquote>`);
+    } else if (block.type === 'pullquote') {
+      const quoteMd = inlineHtmlToTelegramMarkdown(block.text);
+      const citeTag = block.credit && block.credit.trim() ? `<cite>${block.credit.trim()}</cite>` : '';
+      parts.push(`<aside>${quoteMd}${citeTag}</aside>`);
+    } else if (block.type === 'code') {
+      const lang = block.language || '';
+      parts.push(`\`\`\`${lang}\n${block.text || ''}\n\`\`\``);
+    } else if (block.type === 'math') {
+      parts.push(`$$${block.expression || ''}$$`);
+    } else if (block.type === 'divider') {
+      parts.push('---');
+    } else if (block.type === 'table' && block.cells.length > 0) {
+      const headerRow = block.cells[0];
+      const headerLine = `| ${headerRow.map((c) => inlineHtmlToTelegramMarkdown(c.text).replace(/\n/g, ' ')).join(' | ')} |`;
+      const alignLine = `| ${headerRow
+        .map((c) => (c.align === 'center' ? ':---:' : c.align === 'right' ? '---:' : ':---'))
+        .join(' | ')} |`;
+      const bodyLines = block.cells
+        .slice(1)
+        .map((row) => `| ${row.map((c) => inlineHtmlToTelegramMarkdown(c.text).replace(/\n/g, ' ')).join(' | ')} |`);
+      parts.push([headerLine, alignLine, ...bodyLines].join('\n'));
+    } else if (block.type === 'details') {
+      const openAttr = block.is_open ? ' open' : '';
+      const summaryMd = inlineHtmlToTelegramMarkdown(block.summary);
+      const bodyMd = inlineHtmlToTelegramMarkdown(block.text);
+      parts.push(`<details${openAttr}><summary>${summaryMd}</summary>\n\n${bodyMd}\n\n</details>`);
+    } else if (block.type === 'media' && block.images && block.images.length > 0) {
+      const captionPart = block.caption && block.caption.trim() ? ` "${block.caption.trim().replace(/"/g, '\\"')}"` : '';
+      if (block.layout === 'collage' && block.images.length > 1) {
+        const imgs = block.images.map((img) => `![](${img.url})`).join('\n');
+        parts.push(`<tg-collage>\n\n${imgs}\n\n</tg-collage>`);
+      } else if (block.layout === 'slideshow' && block.images.length > 1) {
+        const imgs = block.images.map((img) => `![](${img.url})`).join('\n');
+        parts.push(`<tg-slideshow>\n\n${imgs}\n\n</tg-slideshow>`);
+      } else {
+        parts.push(`![](${block.images[0].url}${captionPart})`);
+      }
+    } else if (block.type === 'audio' || block.type === 'file') {
+      const captionPart = block.caption && block.caption.trim() ? ` "${block.caption.trim().replace(/"/g, '\\"')}"` : '';
+      parts.push(`![](${block.url}${captionPart})`);
+    } else if (block.type === 'button_row' && block.buttons && block.buttons.length > 0) {
+      const alignAttr = block.align ? ` align="${block.align}"` : '';
+      const btnLines = block.buttons.map((btn) => {
+        const styleAttr = btn.style && btn.style !== 'default' ? ` style="${btn.style}"` : '';
+        if (btn.type === 'copy_text') {
+          return `  <tg-button type="copy_text"${styleAttr} text="${btn.value}">${btn.text}</tg-button>`;
+        }
+        return `  <tg-button type="url"${styleAttr} url="${btn.value}">${btn.text}</tg-button>`;
+      });
+      parts.push(`<tg-button-row${alignAttr}>\n${btnLines.join('\n')}\n</tg-button-row>`);
+    } else if (block.type === 'footer' && block.text.trim()) {
+      parts.push(`<footer>${inlineHtmlToTelegramMarkdown(block.text)}</footer>`);
+    }
+  }
+  return parts.join('\n\n').trim();
+}
+
 export const HomeView: React.FC<HomeViewProps> = ({
   userName,
   notes,
@@ -43,6 +170,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
   onOpenNote,
   onToggleFavorite,
   onDeleteNote,
+  onDuplicateNote,
   onBatchDeleteNotes,
   onOpenChannels,
 }) => {
@@ -50,13 +178,75 @@ export const HomeView: React.FC<HomeViewProps> = ({
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isSelectMode, setIsSelectMode] = useState<boolean>(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [openMenuNoteId, setOpenMenuNoteId] = useState<string | null>(null);
+  const [copiedNoteId, setCopiedNoteId] = useState<string | null>(null);
+  const [newlyDuplicatedId, setNewlyDuplicatedId] = useState<string | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const isInitialMount = useRef<boolean>(true);
+  const cardElementRefs = useRef<Record<string, HTMLElement | null>>({});
+  const flipCardPositionsRef = useRef<Map<string, number>>(new Map());
+  const prevNoteIdsRef = useRef<Set<string>>(new Set(notes.map((n) => n.id)));
 
   const triggerHaptic = (style: 'light' | 'medium' | 'heavy' = 'light') => {
     window.Telegram?.WebApp?.HapticFeedback?.impactOccurred(style);
   };
+
+  const captureCardPositions = () => {
+    const positions = new Map<string, number>();
+    notes.forEach((n) => {
+      const el = cardElementRefs.current[n.id];
+      if (el) {
+        positions.set(n.id, el.getBoundingClientRect().top);
+      }
+    });
+    flipCardPositionsRef.current = positions;
+  };
+
+  useLayoutEffect(() => {
+    const currentIds = new Set(notes.map((n) => n.id));
+    let addedId: string | null = null;
+    for (const n of notes) {
+      if (!prevNoteIdsRef.current.has(n.id)) {
+        addedId = n.id;
+        break;
+      }
+    }
+    prevNoteIdsRef.current = currentIds;
+
+    if (addedId) {
+      setNewlyDuplicatedId(addedId);
+      const timer = window.setTimeout(() => {
+        setNewlyDuplicatedId((prev) => (prev === addedId ? null : prev));
+      }, 320);
+
+      if (flipCardPositionsRef.current.size > 0) {
+        const prevPositions = flipCardPositionsRef.current;
+        flipCardPositionsRef.current = new Map();
+        notes.forEach((n) => {
+          const oldTop = prevPositions.get(n.id);
+          const el = cardElementRefs.current[n.id];
+          if (oldTop !== undefined && el) {
+            const newTop = el.getBoundingClientRect().top;
+            const delta = oldTop - newTop;
+            if (Math.abs(delta) > 0.5) {
+              el.animate(
+                [
+                  { transform: `translate3d(0, ${delta}px, 0)` },
+                  { transform: 'translate3d(0, 0, 0)' },
+                ],
+                {
+                  duration: 260,
+                  easing: 'cubic-bezier(0.34, 1.35, 0.64, 1)',
+                }
+              );
+            }
+          }
+        });
+      }
+      return () => clearTimeout(timer);
+    }
+  }, [notes]);
 
   useLayoutEffect(() => {
     if (isInitialMount.current) {
@@ -165,30 +355,29 @@ export const HomeView: React.FC<HomeViewProps> = ({
   return (
     <div className="flex flex-col w-full px-6 safe-bottom-space">
       {isSelectMode ? (
-        <section className="pt-2 pb-3 flex items-center justify-between border-b border-cream-divider animate-page-fade">
-          <div className="flex items-center gap-2">
+        <section className="sticky top-0 z-20 bg-[#FAF8F5]/95 -mx-6 px-6 pt-2 pb-3 flex items-center justify-between gap-2 border-b border-cream-divider animate-page-fade shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
             <button
               onClick={cancelSelection}
-              className="text-xs font-semibold px-2.5 py-1 rounded-full bg-cream-surface text-warm-text physics-bounce"
+              className="text-xs font-semibold px-2.5 py-1 rounded-full bg-cream-surface text-warm-text physics-bounce shrink-0"
             >
               {t('deselect_all')}
             </button>
-            <span className="text-xs font-mono text-warm-accent font-semibold">
+            <span className="text-xs font-mono text-warm-accent font-semibold truncate">
               {t('selected_count', { count: selectedIds.size })}
             </span>
           </div>
-
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={selectAll}
-              className="text-xs font-semibold px-2.5 py-1 rounded-full bg-cream-surface text-warm-text physics-bounce"
+              className="text-xs font-semibold px-2.5 py-1 rounded-full bg-cream-surface text-warm-text physics-bounce shrink-0"
             >
               {t('select_all')}
             </button>
             <button
               onClick={handleBatchDelete}
               disabled={selectedIds.size === 0}
-              className="text-xs font-semibold px-3 py-1 rounded-full bg-red-600 text-white disabled:opacity-40 flex items-center gap-1 physics-bounce"
+              className="text-xs font-semibold px-3 py-1 rounded-full bg-red-600 text-white disabled:opacity-40 flex items-center gap-1 physics-bounce shrink-0"
             >
               <span className="material-symbols-outlined text-[15px]">delete</span>
               <span>{t('batch_delete')}</span>
@@ -279,11 +468,18 @@ export const HomeView: React.FC<HomeViewProps> = ({
               return (
                 <article
                   key={note.id}
+                  ref={(el) => {
+                    cardElementRefs.current[note.id] = el;
+                  }}
                   onTouchStart={() => handleTouchStart(note.id)}
                   onTouchEnd={handleTouchEnd}
                   onTouchMove={handleTouchEnd}
                   onContextMenu={(e) => e.preventDefault()}
                   onClick={() => {
+                    if (openMenuNoteId === note.id) {
+                      setOpenMenuNoteId(null);
+                      return;
+                    }
                     if (isSelectMode) {
                       toggleSelect(note.id);
                     } else {
@@ -291,7 +487,9 @@ export const HomeView: React.FC<HomeViewProps> = ({
                       onOpenNote(note);
                     }
                   }}
-                  className={`py-3.5 border-b border-cream-divider/70 cursor-pointer physics-bounce flex items-start gap-3 select-none ${
+                  className={`py-3.5 border-b border-cream-divider/70 cursor-pointer flex items-start gap-3 select-none ${
+                    openMenuNoteId === note.id ? '' : 'physics-bounce'
+                  } ${newlyDuplicatedId === note.id ? 'animate-block-enter' : ''} ${
                     isSelected ? 'bg-cream-surface/50 -mx-3 px-3 rounded-lg' : ''
                   }`}
                 >
@@ -316,8 +514,47 @@ export const HomeView: React.FC<HomeViewProps> = ({
                       <h4 className="text-base font-semibold text-warm-text leading-snug truncate">
                         {note.title || t('title_placeholder')}
                       </h4>
+
                       {!isSelectMode && (
-                        <div className="flex items-center gap-0.5 shrink-0 -mr-1">
+                        <div
+                          className="relative flex items-center gap-0.5 shrink-0 -mr-1"
+                          onPointerDown={(e) => {
+                            e.stopPropagation();
+                            e.currentTarget.closest('article')?.classList.remove('physics-bounce');
+                          }}
+                          onPointerUp={(e) => {
+                            e.stopPropagation();
+                            if (openMenuNoteId !== note.id) {
+                              e.currentTarget.closest('article')?.classList.add('physics-bounce');
+                            }
+                          }}
+                          onPointerLeave={(e) => {
+                            if (openMenuNoteId !== note.id) {
+                              e.currentTarget.closest('article')?.classList.add('physics-bounce');
+                            }
+                          }}
+                          onTouchStart={(e) => {
+                            e.stopPropagation();
+                            handleTouchEnd();
+                            e.currentTarget.closest('article')?.classList.remove('physics-bounce');
+                          }}
+                          onTouchEnd={(e) => {
+                            e.stopPropagation();
+                            if (openMenuNoteId !== note.id) {
+                              e.currentTarget.closest('article')?.classList.add('physics-bounce');
+                            }
+                          }}
+                          onMouseDown={(e) => {
+                            e.stopPropagation();
+                            e.currentTarget.closest('article')?.classList.remove('physics-bounce');
+                          }}
+                          onMouseUp={(e) => {
+                            e.stopPropagation();
+                            if (openMenuNoteId !== note.id) {
+                              e.currentTarget.closest('article')?.classList.add('physics-bounce');
+                            }
+                          }}
+                        >
                           <button
                             type="button"
                             onClick={(e) => {
@@ -336,6 +573,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                               bookmark
                             </span>
                           </button>
+
                           <button
                             type="button"
                             onClick={(e) => {
@@ -349,6 +587,71 @@ export const HomeView: React.FC<HomeViewProps> = ({
                           >
                             <span className="material-symbols-outlined text-[18px] leading-none">delete</span>
                           </button>
+
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              triggerHaptic('light');
+                              setOpenMenuNoteId((prev) => (prev === note.id ? null : note.id));
+                            }}
+                            className="w-7 h-7 flex items-center justify-center rounded-full text-warm-subtle hover:text-warm-text hover:bg-cream-surface transition-colors"
+                          >
+                            <span className="material-symbols-outlined text-[18px] leading-none">
+                              {copiedNoteId === note.id ? 'check' : 'more_vert'}
+                            </span>
+                          </button>
+
+                          {openMenuNoteId === note.id && (
+                            <>
+                              <div
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setOpenMenuNoteId(null);
+                                }}
+                                className="fixed inset-0 z-30"
+                              />
+                              <div
+                                onClick={(e) => e.stopPropagation()}
+                                className="absolute right-0 top-full mt-1 w-44 bg-[#FAF8F5] border border-cream-divider rounded-2xl shadow-md p-1 z-40 animate-toc-down flex flex-col gap-0.5"
+                              >
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setOpenMenuNoteId(null);
+                                    captureCardPositions();
+                                    onDuplicateNote?.(note);
+                                  }}
+                                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-warm-text hover:bg-cream-surface active:opacity-70 transition-colors text-left"
+                                >
+                                  <span className="material-symbols-outlined text-[15px] text-warm-accent">content_copy</span>
+                                  <span>Duplicate</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    triggerHaptic('medium');
+                                    const mdText = convertNoteToTelegramMarkdown(note);
+                                    try {
+                                      await navigator.clipboard.writeText(mdText);
+                                      window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('success');
+                                      setCopiedNoteId(note.id);
+                                      setTimeout(() => setCopiedNoteId(null), 1800);
+                                    } catch (err) {
+                                      console.error(`CLIPBOARD_COPY_FAILED: ${(err as Error).message}`);
+                                    }
+                                    setOpenMenuNoteId(null);
+                                  }}
+                                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-warm-text hover:bg-cream-surface active:opacity-70 transition-colors text-left"
+                                >
+                                  <span className="material-symbols-outlined text-[15px] text-warm-accent">code</span>
+                                  <span>Copy to Markdown</span>
+                                </button>
+                              </div>
+                            </>
+                          )}
                         </div>
                       )}
                     </div>

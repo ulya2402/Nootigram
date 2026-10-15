@@ -70,6 +70,7 @@
   "tool_quote_pull": "Highlight",
   "tool_table": "Insert Table",
   "tool_code": "Code",
+  "tool_import_csv": "Import CSV",
   "tool_math": "Formula",
   "tool_details": "Collapsible",
   "tool_divider": "Divider",

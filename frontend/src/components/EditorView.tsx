@@ -64,6 +64,390 @@ const stripEdgeBreaks = (html: string): string => {
   return result;
 };
 
+const escapeHtmlEntities = (raw: string): string => {
+  return raw
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+};
+
+const parseInlineMarkdownToHtml = (raw: string): string => {
+  if (!raw) return '';
+  const codeTokens: string[] = [];
+  let text = raw.replace(/`([^`\n]+)`/g, (_, codeContent) => {
+    const idx = codeTokens.length;
+    codeTokens.push(`<code>${escapeHtmlEntities(codeContent)}</code>`);
+    return `\u0000CODE_${idx}\u0000`;
+  });
+
+  const preservedTagTokens: string[] = [];
+  text = text.replace(/<(\/?(?:u|ins|sub|sup|b|strong|i|em|s|strike|del|mark|tg-spoiler|tg-time|tg-emoji|a)(?:\s+[^>]*)?)>/gi, (match) => {
+    const idx = preservedTagTokens.length;
+    preservedTagTokens.push(match);
+    return `\u0000TAG_${idx}\u0000`;
+  });
+
+  text = escapeHtmlEntities(text);
+
+  text = text
+    .replace(/!\[([^\]]*)\]\(tg:\/\/time\?unix=(\d+)(?:&amp;format=([a-zA-Z]+))?\)/g, (_, label, unix, fmt) => {
+      const fmtAttr = fmt ? ` format="${fmt}"` : '';
+      return `<tg-time unix="${unix}"${fmtAttr}>${label}</tg-time>`;
+    })
+    .replace(/!\[([^\]]*)\]\(tg:\/\/emoji\?id=(\d+)\)/g, '<tg-emoji emoji-id="$2">$1</tg-emoji>')
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+|tg:\/\/[^\s)]+|mailto:[^\s)]+|tel:[^\s)]+|#[^\s)]+)\)/g, '<a href="$2">$1</a>')
+    .replace(/\*\*([\s\S]+?)\*\*/g, '<b>$1</b>')
+    .replace(/__([\s\S]+?)__/g, '<b>$1</b>')
+    .replace(/~~([\s\S]+?)~~/g, '<s>$1</s>')
+    .replace(/==([\s\S]+?)==/g, '<mark>$1</mark>')
+    .replace(/\|\|([\s\S]+?)\|\|/g, '<tg-spoiler>$1</tg-spoiler>')
+    .replace(/(^|[^\*])\*([^\*\n]+)\*(?!\*)/g, '$1<i>$2</i>')
+    .replace(/(^|[^_])_([^_\n]+)_(?!_)/g, '$1<i>$2</i>');
+
+  text = text.replace(/\u0000TAG_(\d+)\u0000/g, (_, idx) => preservedTagTokens[Number(idx)] || '');
+  text = text.replace(/\u0000CODE_(\d+)\u0000/g, (_, idx) => codeTokens[Number(idx)] || '');
+  return text.replace(/\n/g, '<br>');
+};
+
+const convertClipboardHtmlToMarkdown = (html: string): string => {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, 'text/html');
+  const walk = (node: Node): string => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      return node.nodeValue || '';
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return '';
+    const el = node as HTMLElement;
+    const tag = el.tagName.toLowerCase();
+    const styleAttr = (el.getAttribute('style') || '').toLowerCase();
+    const childrenText = Array.from(el.childNodes).map(walk).join('');
+    if (tag === 'br') return '\n';
+    if (/^h[1-6]$/.test(tag) || el.getAttribute('role') === 'heading') {
+      const level = /^h[1-6]$/.test(tag)
+        ? Number(tag.charAt(1))
+        : Math.min(6, Math.max(1, Number(el.getAttribute('aria-level') || 2)));
+      const cleanHeading = childrenText.replace(/[\r\n]+/g, ' ').replace(/\*\*|__/g, '').trim();
+      return cleanHeading ? `\n\n${'#'.repeat(level)} ${cleanHeading}\n\n` : '';
+    }
+    if (tag === 'b' || tag === 'strong') {
+      if (el.querySelector('h1, h2, h3, h4, h5, h6')) return childrenText;
+      return `**${childrenText}**`;
+    }
+    if (tag === 'i' || tag === 'em') return `*${childrenText}*`;
+    if (tag === 'u' || tag === 'ins') return `<u>${childrenText}</u>`;
+    if (tag === 's' || tag === 'strike' || tag === 'del') return `~~${childrenText}~~`;
+    if (tag === 'mark') return `==${childrenText}==`;
+    if (tag === 'tg-spoiler') return `||${childrenText}||`;
+    if (tag === 'span') {
+      let wrapped = childrenText;
+      if (/font-weight\s*:\s*(?:bold|[6-9]00)/.test(styleAttr) && !wrapped.includes('**')) {
+        wrapped = `**${wrapped}**`;
+      }
+      if (/font-style\s*:\s*italic/.test(styleAttr)) {
+        wrapped = `*${wrapped}*`;
+      }
+      if (/text-decoration[^;]*underline/.test(styleAttr)) {
+        wrapped = `<u>${wrapped}</u>`;
+      }
+      if (/text-decoration[^;]*line-through/.test(styleAttr)) {
+        wrapped = `~~${wrapped}~~`;
+      }
+      return wrapped;
+    }
+    if (tag === 'code' && el.parentElement?.tagName.toLowerCase() !== 'pre') {
+      return `\`${childrenText}\``;
+    }
+    if (tag === 'pre') {
+      const codeEl = el.querySelector('code');
+      const classAttr = codeEl?.getAttribute('class') || el.getAttribute('class') || '';
+      const langMatch = classAttr.match(/language-([a-zA-Z0-9_-]+)/i);
+      const lang = langMatch ? langMatch[1] : '';
+      const rawCode = (codeEl || el).textContent || '';
+      return `\n\`\`\`${lang}\n${rawCode.trim()}\n\`\`\`\n\n`;
+    }
+    if (tag === 'blockquote') {
+      const lines = childrenText.trim().split('\n').map((l) => `> ${l}`).join('\n');
+      return `\n${lines}\n\n`;
+    }
+    if (tag === 'hr') return `\n---\n\n`;
+    if (tag === 'ul') {
+      const items = Array.from(el.children)
+        .filter((c) => c.tagName.toLowerCase() === 'li')
+        .map((li) => {
+          const chk = li.querySelector('input[type="checkbox"]') as HTMLInputElement | null;
+          const liText = Array.from(li.childNodes).map(walk).join('').replace(/\n+/g, ' ').trim();
+          if (chk) {
+            return `- [${chk.checked ? 'x' : ' '}] ${liText}`;
+          }
+          return `- ${liText}`;
+        })
+        .join('\n');
+      return `\n${items}\n\n`;
+    }
+    if (tag === 'ol') {
+      const startAttr = Number(el.getAttribute('start') || 1);
+      const items = Array.from(el.children)
+        .filter((c) => c.tagName.toLowerCase() === 'li')
+        .map((li, idx) => `${startAttr + idx}.${Array.from(li.childNodes).map(walk).join('').replace(/\n+/g, ' ').trim()}`)
+        .join('\n');
+      return `\n${items}\n\n`;
+    }
+    if (tag === 'table') {
+      const rows = Array.from(el.querySelectorAll('tr'));
+      if (rows.length === 0) return childrenText;
+      const matrix = rows.map((tr) =>
+        Array.from(tr.querySelectorAll('th, td')).map((cell) =>
+          Array.from(cell.childNodes).map(walk).join('').replace(/\n+/g, ' ').trim()
+        )
+      );
+      const colCount = Math.max(...matrix.map((r) => r.length), 1);
+      const normalized = matrix.map((r) => {
+        const padded = [...r];
+        while (padded.length < colCount) padded.push('');
+        return padded;
+      });
+      const header = `| ${normalized[0].join(' | ')} |`;
+      const sep = `| ${normalized[0].map(() => ':---').join(' | ')} |`;
+      const body = normalized.slice(1).map((r) => `| ${r.join(' | ')} |`);
+      return `\n${[header, sep, ...body].join('\n')}\n\n`;
+    }
+    if (tag === 'a') {
+      const href = el.getAttribute('href') || '';
+      return href ? `[${childrenText}](${href})` : childrenText;
+    }
+    if (tag === 'p' || tag === 'div' || tag === 'section' || tag === 'article') {
+      return `${childrenText}\n\n`;
+    }
+    return childrenText;
+  };
+  return walk(doc.body).replace(/\n{3,}/g, '\n\n').trim();
+};
+
+const cleanMarkdownLine = (rawLine: string): string => {
+  return rawLine.replace(/[\u200B-\u200D\uFEFF]/g, '').replace(/\u00A0/g, ' ').trim();
+};
+
+const matchMarkdownHeading = (trimmedLine: string): { size: 1 | 2 | 3 | 4 | 5 | 6; text: string } | null => {
+  const m = trimmedLine.match(/^(?:\*\*|__)?(#{1,6})(?:\s+)(.+?)(?:\*\*|__)?$/);
+  if (!m) return null;
+  const size = Math.min(6, Math.max(1, m[1].length)) as 1 | 2 | 3 | 4 | 5 | 6;
+  const text = m[2].replace(/\*\*|__|~~|==|\|\||`/g, '').trim();
+  if (!text) return null;
+  return { size, text };
+};
+
+const parseMarkdownToContentBlocks = (markdown: string): ContentBlock[] => {
+  const lines = markdown.replace(/\r\n|\r|\u2028|\u2029/g, '\n').split('\n');
+  const blocks: ContentBlock[] = [];
+  const now = Date.now();
+  let bCounter = 0;
+  const nextId = (prefix: string) => `${prefix}-${now}-${bCounter++}-${Math.random().toString(36).slice(2, 6)}`;
+
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    const trimmed = cleanMarkdownLine(line);
+
+    if (!trimmed) {
+      i++;
+      continue;
+    }
+
+    if (trimmed.startsWith('```')) {
+      const lang = trimmed.slice(3).trim().toLowerCase();
+      const codeLines: string[] = [];
+      i++;
+      while (i < lines.length && !cleanMarkdownLine(lines[i]).startsWith('```')) {
+        codeLines.push(lines[i]);
+        i++;
+      }
+      if (i < lines.length) i++;
+      if (lang === 'math') {
+        blocks.push({ id: nextId('math'), type: 'math', expression: codeLines.join('\n').trim() });
+      } else {
+        blocks.push({ id: nextId('code'), type: 'code', language: lang || 'javascript', text: codeLines.join('\n') });
+      }
+      continue;
+    }
+
+    if (trimmed.startsWith('$$') && trimmed.endsWith('$$') && trimmed.length > 4) {
+      blocks.push({ id: nextId('math'), type: 'math', expression: trimmed.slice(2, -2).trim() });
+      i++;
+      continue;
+    }
+
+    if (/^(?:---|\*\*\*|___)$/.test(trimmed)) {
+      blocks.push({ id: nextId('div'), type: 'divider' });
+      i++;
+      continue;
+    }
+
+    const headingData = matchMarkdownHeading(trimmed);
+    if (headingData) {
+      blocks.push({ id: nextId('h'), type: 'heading', size: headingData.size, text: headingData.text });
+      i++;
+      continue;
+    }
+
+    const mediaMatch = trimmed.match(/^!\[[^\]]*\]\((https?:\/\/[^\s)"]+)(?:\s+"([^"]*)")?\)$/);
+    if (mediaMatch) {
+      const mediaUrl = mediaMatch[1];
+      const mediaCaption = mediaMatch[2] || '';
+      if (/\.(mp3|ogg|wav|m4a)(\?.*)?$/i.test(mediaUrl)) {
+        blocks.push({ id: nextId('audio'), type: 'audio', url: mediaUrl, name: 'Audio', caption: mediaCaption });
+      } else if (/\.(pdf|zip|rar|doc|docx|xls|xlsx|txt)(\?.*)?$/i.test(mediaUrl)) {
+        blocks.push({ id: nextId('file'), type: 'file', url: mediaUrl, name: 'Document', caption: mediaCaption });
+      } else {
+        blocks.push({
+          id: nextId('media'),
+          type: 'media',
+          layout: 'single',
+          images: [{ id: nextId('img'), url: mediaUrl }],
+          caption: mediaCaption,
+        });
+      }
+      i++;
+      continue;
+    }
+
+    if (trimmed.startsWith('|') && trimmed.endsWith('|') && i + 1 < lines.length && /^\|[\s:-]+\|/.test(cleanMarkdownLine(lines[i + 1]))) {
+      const parseRow = (r: string) =>
+        cleanMarkdownLine(r)
+          .replace(/^\||\|$/g, '')
+          .split('|')
+          .map((c) => c.trim());
+      const headerTexts = parseRow(trimmed);
+      const alignRow = parseRow(lines[i + 1]);
+      const aligns: ('left' | 'center' | 'right')[] = alignRow.map((a) => {
+        if (a.startsWith(':') && a.endsWith(':')) return 'center';
+        if (a.endsWith(':')) return 'right';
+        return 'left';
+      });
+      const cells: TableCell[][] = [
+        headerTexts.map((hText, cIdx) => ({
+          text: parseInlineMarkdownToHtml(hText),
+          is_header: true,
+          align: aligns[cIdx] || 'left',
+        })),
+      ];
+      i += 2;
+      while (i < lines.length && cleanMarkdownLine(lines[i]).startsWith('|') && cleanMarkdownLine(lines[i]).endsWith('|')) {
+        const rowValues = parseRow(lines[i]);
+        cells.push(
+          headerTexts.map((_, cIdx) => ({
+            text: parseInlineMarkdownToHtml(rowValues[cIdx] || ''),
+            align: aligns[cIdx] || 'left',
+          }))
+        );
+        i++;
+      }
+      blocks.push({
+        id: nextId('tbl'),
+        type: 'table',
+        is_bordered: true,
+        is_striped: false,
+        cells,
+      });
+      continue;
+    }
+
+    if (/^>\s?/.test(trimmed)) {
+      const quoteLines: string[] = [];
+      while (i < lines.length && /^>\s?/.test(cleanMarkdownLine(lines[i]))) {
+        quoteLines.push(cleanMarkdownLine(lines[i]).replace(/^>\s?/, ''));
+        i++;
+      }
+      let credit = '';
+      if (quoteLines.length > 1 && /^(?:—|--)\s*/.test(quoteLines[quoteLines.length - 1])) {
+        credit = quoteLines.pop()!.replace(/^(?:—|--)\s*/, '').trim();
+      }
+      blocks.push({
+        id: nextId('q'),
+        type: 'quote',
+        text: parseInlineMarkdownToHtml(quoteLines.join('\n')),
+        credit,
+      });
+      continue;
+    }
+
+    if (/^[-*+]\s+\[([ xX])\]\s+/.test(trimmed)) {
+      const items: TaskItem[] = [];
+      while (i < lines.length && /^[-*+]\s+\[([ xX])\]\s+/.test(cleanMarkdownLine(lines[i]))) {
+        const m = cleanMarkdownLine(lines[i]).match(/^[-*+]\s+\[([ xX])\]\s+(.*)$/);
+        if (m) {
+          items.push({
+            id: nextId('task'),
+            is_checked: m[1].toLowerCase() === 'x',
+            text: m[2].replace(/\*\*|__|~~|==|\|\||`/g, '').trim(),
+          });
+        }
+        i++;
+      }
+      blocks.push({ id: nextId('list'), type: 'list', style: 'task', items });
+      continue;
+    }
+
+    if (/^[-*+•]\s+/.test(trimmed)) {
+      const items: TaskItem[] = [];
+      while (i < lines.length && /^[-*+•]\s+/.test(cleanMarkdownLine(lines[i])) && !/^[-*+]\s+\[([ xX])\]\s+/.test(cleanMarkdownLine(lines[i]))) {
+        items.push({
+          id: nextId('item'),
+          is_checked: false,
+          text: cleanMarkdownLine(lines[i]).replace(/^[-*+•]\s+/, '').replace(/\*\*|__|~~|==|\|\||`/g, '').trim(),
+        });
+        i++;
+      }
+      blocks.push({ id: nextId('list'), type: 'list', style: 'bullet', items });
+      continue;
+    }
+
+    if (/^\d+\.\s+/.test(trimmed)) {
+      const items: TaskItem[] = [];
+      while (i < lines.length && /^\d+\.\s+/.test(cleanMarkdownLine(lines[i]))) {
+        items.push({
+          id: nextId('item'),
+          is_checked: false,
+          text: cleanMarkdownLine(lines[i]).replace(/^\d+\.\s+/, '').replace(/\*\*|__|~~|==|\|\||`/g, '').trim(),
+        });
+        i++;
+      }
+      blocks.push({ id: nextId('list'), type: 'list', style: 'ordered', items });
+      continue;
+    }
+
+    const paraLines: string[] = [];
+    while (i < lines.length) {
+      const curTrimmed = cleanMarkdownLine(lines[i]);
+      if (
+        curTrimmed === '' ||
+        curTrimmed.startsWith('```') ||
+        matchMarkdownHeading(curTrimmed) !== null ||
+        /^(?:---|\*\*\*|___)$/.test(curTrimmed) ||
+        /^>\s?/.test(curTrimmed) ||
+        /^[-*+•]\s+/.test(curTrimmed) ||
+        /^\d+\.\s+/.test(curTrimmed) ||
+        (curTrimmed.startsWith('|') && curTrimmed.endsWith('|'))
+      ) {
+        break;
+      }
+      paraLines.push(lines[i].replace(/[\u200B-\u200D\uFEFF]/g, ''));
+      i++;
+    }
+    if (paraLines.length > 0) {
+      blocks.push({
+        id: nextId('p'),
+        type: 'paragraph',
+        text: parseInlineMarkdownToHtml(paraLines.join('\n')),
+      });
+    } else {
+      i++;
+    }
+  }
+
+  return blocks;
+};
+
 const EditableBlock: React.FC<{
   html: string;
   placeholder: string;
@@ -72,9 +456,11 @@ const EditableBlock: React.FC<{
   onChange: (newHtml: string) => void;
   onKeyDown?: (e: React.KeyboardEvent<HTMLDivElement>) => void;
   onAnchorClick?: (href: string) => void;
-}> = ({ html, placeholder, className, onFocus, onChange, onKeyDown, onAnchorClick }) => {
+  onSmartPasteBlocks?: (blocks: ContentBlock[]) => void;
+}> = ({ html, placeholder, className, onFocus, onChange, onKeyDown, onAnchorClick, onSmartPasteBlocks }) => {
   const divRef = useRef<HTMLDivElement>(null);
   const lastHtmlRef = useRef<string | null>(null);
+  const isSmartPastingRef = useRef<boolean>(false);
 
   useEffect(() => {
     if (!divRef.current) return;
@@ -86,8 +472,44 @@ const EditableBlock: React.FC<{
 
   const handlePaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
     e.preventDefault();
-    const text = e.clipboardData.getData('text/plain');
-    document.execCommand('insertText', false, text);
+    const rawPlain = e.clipboardData.getData('text/plain') || '';
+    const rawHtml = e.clipboardData.getData('text/html') || '';
+
+    const plainHasHeadings = /(?:^|\n)[ \t\u00A0\u200B]*#{1,6}[ \t\u00A0]+/.test(rawPlain);
+    const htmlHasHeadings = /<h[1-6]\b|role=["']heading["']/i.test(rawHtml);
+    const hasMarkdownPatterns = /(?:^|\n)[ \t\u00A0\u200B]*(?:#{1,6}[ \t\u00A0]+|```|>\s?|[-*+][ \t\u00A0]+|\d+\.[ \t\u00A0]+|\|.+\||---)|\*\*[^*]+\*\*|__[^_]+__|~~[^~]+~~|==[^=]+==|\|\|[^|]+\|\||`[^`]+`|\[[^\]]+\]\([^)]+\)/.test(rawPlain);
+    const hasRichHtmlTags = /<(?:h[1-6]|b|strong|i|em|u|s|del|code|pre|ul|ol|li|blockquote|table|mark|a)\b/i.test(rawHtml);
+
+    const sourceMarkdown =
+      htmlHasHeadings && !plainHasHeadings
+        ? convertClipboardHtmlToMarkdown(rawHtml)
+        : hasMarkdownPatterns
+        ? rawPlain
+        : hasRichHtmlTags
+        ? convertClipboardHtmlToMarkdown(rawHtml)
+        : rawPlain;
+
+    const parsedBlocks = parseMarkdownToContentBlocks(sourceMarkdown);
+
+    if (onSmartPasteBlocks && (parsedBlocks.length > 1 || (parsedBlocks.length === 1 && parsedBlocks[0].type !== 'paragraph'))) {
+      isSmartPastingRef.current = true;
+      onSmartPasteBlocks(parsedBlocks);
+      setTimeout(() => {
+        isSmartPastingRef.current = false;
+      }, 150);
+      return;
+    }
+
+    const inlineHtml = parsedBlocks.length === 1 && parsedBlocks[0].type === 'paragraph'
+      ? parsedBlocks[0].text
+      : parseInlineMarkdownToHtml(rawPlain);
+
+    document.execCommand('insertHTML', false, inlineHtml);
+    if (divRef.current) {
+      const currentHtml = divRef.current.innerHTML;
+      lastHtmlRef.current = currentHtml;
+      onChange(currentHtml);
+    }
   };
 
   const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -110,14 +532,36 @@ const EditableBlock: React.FC<{
       onFocus={onFocus}
       onClick={handleClick}
       onInput={(e) => {
+        if (isSmartPastingRef.current) return;
         const currentHtml = e.currentTarget.innerHTML;
+        const plainContent = e.currentTarget.innerText || '';
+        const prevLen = (lastHtmlRef.current || '').replace(/<[^>]*>/g, '').length;
+        if (
+          onSmartPasteBlocks &&
+          plainContent.length - prevLen > 12 &&
+          /(?:^|\n)[ \t\u00A0\u200B]*(?:#{1,6}\s+|```|\|.+\|)/.test(plainContent)
+        ) {
+          const parsedBlocks = parseMarkdownToContentBlocks(plainContent);
+          if (parsedBlocks.length > 1 || (parsedBlocks.length === 1 && parsedBlocks[0].type !== 'paragraph')) {
+            isSmartPastingRef.current = true;
+            e.currentTarget.innerHTML = lastHtmlRef.current || '';
+            onSmartPasteBlocks(parsedBlocks);
+            setTimeout(() => {
+              isSmartPastingRef.current = false;
+            }, 150);
+            return;
+          }
+        }
         lastHtmlRef.current = currentHtml;
         onChange(currentHtml);
       }}
       onBlur={(e) => {
+        if (isSmartPastingRef.current) return;
         const currentHtml = e.currentTarget.innerHTML;
-        lastHtmlRef.current = currentHtml;
-        onChange(currentHtml);
+        if (currentHtml !== lastHtmlRef.current) {
+          lastHtmlRef.current = currentHtml;
+          onChange(currentHtml);
+        }
       }}
       onKeyDown={onKeyDown}
       onPaste={handlePaste}
@@ -344,6 +788,7 @@ const [uploadingMediaType, setUploadingMediaType] = useState<'image' | 'audio' |
 const fileInputRef = useRef<HTMLInputElement>(null);
 const audioInputRef = useRef<HTMLInputElement>(null);
 const docFileInputRef = useRef<HTMLInputElement>(null);
+const csvInputRef = useRef<HTMLInputElement>(null);
 const targetMediaBlockIndexRef = useRef<number | null>(null);
 const totalImageCount = currentNote.blocks.reduce((count, b) => {
   return b.type === 'media' ? count + (b.images?.length || 0) : count;
@@ -439,6 +884,7 @@ const handleDocFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => 
       alert(t('file_size_exceeded'));
       return;
     }
+
     setIsUploadingGlobal(true);
     setUploadingMediaType('file');
     try {
@@ -459,6 +905,7 @@ const handleDocFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => 
     const targetPos = focusedBlockIndex !== null && focusedBlockIndex >= 0 && focusedBlockIndex < currentNote.blocks.length
       ? focusedBlockIndex + 1
       : currentNote.blocks.length;
+
     const nextBlocks = [
       ...currentNote.blocks.slice(0, targetPos),
       newBlock,
@@ -476,6 +923,154 @@ const handleDocFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => 
   } finally {
     setIsUploadingGlobal(false);
     setUploadingMediaType(null);
+  }
+};
+
+const triggerImportCsv = () => {
+  triggerHaptic('light');
+  csvInputRef.current?.click();
+};
+
+const parseCsvToTableCells = (rawCsv: string): TableCell[][] => {
+  const cleaned = rawCsv.replace(/^\uFEFF/, '').replace(/\r\n|\r/g, '\n');
+  const firstLine = cleaned.split('\n').find((l) => l.trim().length > 0) || '';
+  let commaCount = 0;
+  let semiCount = 0;
+  let tabCount = 0;
+  let inQ = false;
+  for (let i = 0; i < firstLine.length; i++) {
+    const ch = firstLine[i];
+    if (ch === '"') inQ = !inQ;
+    else if (!inQ) {
+      if (ch === ',') commaCount++;
+      else if (ch === ';') semiCount++;
+      else if (ch === '\t') tabCount++;
+    }
+  }
+  const delimiter = tabCount > commaCount && tabCount > semiCount ? '\t' : semiCount > commaCount ? ';' : ',';
+
+  const rows: string[][] = [];
+  let currentRow: string[] = [];
+  let currentCell = '';
+  let insideQuotes = false;
+
+  for (let i = 0; i < cleaned.length; i++) {
+    const ch = cleaned[i];
+    const nextCh = cleaned[i + 1];
+    if (insideQuotes) {
+      if (ch === '"' && nextCh === '"') {
+        currentCell += '"';
+        i++;
+      } else if (ch === '"') {
+        insideQuotes = false;
+      } else {
+        currentCell += ch;
+      }
+    } else {
+      if (ch === '"') {
+        insideQuotes = true;
+      } else if (ch === delimiter) {
+        currentRow.push(currentCell.trim());
+        currentCell = '';
+      } else if (ch === '\n') {
+        currentRow.push(currentCell.trim());
+        if (currentRow.some((c) => c.length > 0)) {
+          rows.push(currentRow);
+        }
+        currentRow = [];
+        currentCell = '';
+      } else {
+        currentCell += ch;
+      }
+    }
+  }
+  currentRow.push(currentCell.trim());
+  if (currentRow.some((c) => c.length > 0)) {
+    rows.push(currentRow);
+  }
+
+  const limitedRows = rows.slice(0, 100);
+  if (limitedRows.length === 0) return [];
+
+  const maxCols = Math.min(20, Math.max(...limitedRows.map((r) => r.length), 1));
+
+  return limitedRows.map((row, rIdx) => {
+    const normalizedRow = row.slice(0, maxCols);
+    while (normalizedRow.length < maxCols) {
+      normalizedRow.push('');
+    }
+    return normalizedRow.map((cellText) => ({
+      text: escapeHtmlEntities(cellText).replace(/\n/g, ' '),
+      is_header: rIdx === 0,
+      align: 'left' as const,
+    }));
+  });
+};
+
+const handleCsvFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  e.target.value = '';
+
+  if (file.size > 10 * 1024 * 1024) {
+    triggerHaptic('heavy');
+    window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('error');
+    alert(t('file_size_exceeded'));
+    return;
+  }
+
+  try {
+    const csvText = await file.text();
+    const parsedCells = parseCsvToTableCells(csvText);
+    if (parsedCells.length === 0) {
+      triggerHaptic('medium');
+      window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('warning');
+      return;
+    }
+
+    const bId1 = `b-csv-${Date.now()}-1`;
+    const bId2 = `b-csv-${Date.now()}-2`;
+    const tableBlock: ContentBlock = {
+      id: bId1,
+      type: 'table',
+      is_bordered: true,
+      is_striped: false,
+      cells: parsedCells,
+    };
+    const trailingParagraph: ContentBlock = {
+      id: bId2,
+      type: 'paragraph',
+      text: '',
+    };
+
+    const targetIndex =
+      focusedBlockIndex !== null && focusedBlockIndex >= 0 && focusedBlockIndex < currentNote.blocks.length
+        ? focusedBlockIndex + 1
+        : currentNote.blocks.length;
+
+    captureFlipPositions();
+    const nextBlocks = [
+      ...currentNote.blocks.slice(0, targetIndex),
+      tableBlock,
+      trailingParagraph,
+      ...currentNote.blocks.slice(targetIndex),
+    ];
+
+    persistChange({ ...currentNote, blocks: nextBlocks }, true);
+    setFocusedBlockIndex(targetIndex);
+    triggerHaptic('medium');
+    window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('success');
+
+    setTimeout(() => {
+      blockElementRefs.current[bId1]?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'nearest',
+      });
+    }, 60);
+  } catch (err) {
+    console.error(`CSV_IMPORT_FAILED: ${(err as Error).message}`);
+    triggerHaptic('heavy');
+    window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('error');
   }
 };
   const [isExporting, setIsExporting] = useState<boolean>(false);
@@ -1175,12 +1770,349 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
       onSave(target);
     }
   };
+const [isAllBlocksSelected, setIsAllBlocksSelected] = useState<boolean>(false);
+  const singleBlockSelectedRef = useRef<{ blockIndex: number | null; time: number }>({
+    blockIndex: null,
+    time: 0,
+  });
+  const lastCtrlKeyTimeRef = useRef<number>(0);
+  const didCopyOrCutRef = useRef<boolean>(false);
+
+  const isCurrentFieldFullySelected = useCallback((): boolean => {
+    const activeEl = document.activeElement as HTMLElement | null;
+    if (activeEl && (activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'INPUT')) {
+      const inputEl = activeEl as HTMLInputElement | HTMLTextAreaElement;
+      const valLen = (inputEl.value || '').length;
+      if (valLen === 0) return false;
+      return inputEl.selectionStart === 0 && inputEl.selectionEnd === valLen;
+    }
+    const editable = activeEl?.closest<HTMLElement>('[contenteditable="true"]');
+    const sel = window.getSelection();
+    if (editable && sel) {
+      const normTotal = (editable.textContent || '').replace(/[\s\u200B-\u200D\uFEFF]/g, '');
+      if (normTotal.length === 0) return false;
+      const normSelected = sel.toString().replace(/[\s\u200B-\u200D\uFEFF]/g, '');
+      return normSelected.length >= normTotal.length;
+    }
+    return false;
+  }, []);
+
+  const activateAllBlocksSelection = useCallback(() => {
+    singleBlockSelectedRef.current = { blockIndex: null, time: 0 };
+    window.getSelection()?.removeAllRanges();
+    if (scrollContainerRef.current?.parentElement) {
+      scrollContainerRef.current.parentElement.scrollTop = 0;
+    }
+    window.scrollTo(0, 0);
+    setIsAllBlocksSelected(true);
+    setIsEditorActive(true);
+    triggerHaptic('medium');
+  }, []);
+
+  const handleSmartPasteBlocks = (index: number, pastedBlocks: ContentBlock[]) => {
+    if (pastedBlocks.length === 0) return;
+    triggerHaptic('medium');
+    captureFlipPositions();
+    const targetBlock = currentNote.blocks[index];
+    const isTargetEmptyParagraph =
+      targetBlock &&
+      targetBlock.type === 'paragraph' &&
+      targetBlock.text.replace(/<[^>]*>/g, '').trim() === '';
+
+    const lastPasted = pastedBlocks[pastedBlocks.length - 1];
+    const trailingBlocks: ContentBlock[] =
+      lastPasted.type !== 'paragraph'
+        ? [{ id: `p-${Date.now()}-trail`, type: 'paragraph', text: '' }]
+        : [];
+
+    const nextBlocks = isTargetEmptyParagraph
+      ? [
+          ...currentNote.blocks.slice(0, index),
+          ...pastedBlocks,
+          ...trailingBlocks,
+          ...currentNote.blocks.slice(index + 1),
+        ]
+      : [
+          ...currentNote.blocks.slice(0, index + 1),
+          ...pastedBlocks,
+          ...trailingBlocks,
+          ...currentNote.blocks.slice(index + 1),
+        ];
+
+    persistChange({ ...currentNote, blocks: nextBlocks }, true);
+    const focusIdx = isTargetEmptyParagraph
+      ? index + pastedBlocks.length - 1
+      : index + pastedBlocks.length;
+    setFocusedBlockIndex(Math.min(focusIdx, nextBlocks.length - 1));
+  };
+
+  const buildNotePlainTextAndHtml = useCallback(() => {
+    const plainParts: string[] = [];
+    const htmlParts: string[] = [];
+    if (currentNote.title.trim()) {
+      plainParts.push(`# ${currentNote.title.trim()}`);
+      htmlParts.push(`<h1>${escapeHtmlEntities(currentNote.title.trim())}</h1>`);
+    }
+    currentNote.blocks.forEach((b) => {
+      if (b.type === 'heading') {
+        plainParts.push(`${'#'.repeat(b.size)} ${b.text}`);
+        htmlParts.push(`<h${b.size}>${escapeHtmlEntities(b.text)}</h${b.size}>`);
+      } else if (b.type === 'paragraph') {
+        const plain = b.text.replace(/<br\s*[\/]?>/gi, '\n').replace(/<[^>]*>/g, '').trim();
+        if (plain) plainParts.push(plain);
+        if (b.text.trim()) htmlParts.push(`<p>${b.text}</p>`);
+      } else if (b.type === 'quote' || b.type === 'expandable_quote' || b.type === 'pullquote') {
+        const plain = b.text.replace(/<br\s*[\/]?>/gi, '\n').replace(/<[^>]*>/g, '').trim();
+        plainParts.push(`> ${plain}${b.credit ? `\n> — ${b.credit}` : ''}`);
+        htmlParts.push(`<blockquote>${b.text}</blockquote>`);
+      } else if (b.type === 'list') {
+        const lines = b.items.map((it, idx) =>
+          b.style === 'task'
+            ? `- [${it.is_checked ? 'x' : ' '}] ${it.text}`
+            : b.style === 'ordered'
+            ? `${idx + 1}.${it.text}`
+            : `- ${it.text}`
+        );
+        plainParts.push(lines.join('\n'));
+        htmlParts.push(`<ul>${b.items.map((it) => `<li>${escapeHtmlEntities(it.text)}</li>`).join('')}</ul>`);
+      } else if (b.type === 'code') {
+        plainParts.push(`\`\`\`${b.language || ''}\n${b.text}\n\`\`\``);
+        htmlParts.push(`<pre><code>${escapeHtmlEntities(b.text)}</code></pre>`);
+      } else if (b.type === 'math') {
+        plainParts.push(`$$${b.expression}$$`);
+        htmlParts.push(`<p>$$${escapeHtmlEntities(b.expression)}$$</p>`);
+      } else if (b.type === 'table') {
+        const rowsText = b.cells.map((row) => `| ${row.map((c) => c.text.replace(/<[^>]*>/g, '').trim()).join(' | ')} |`);
+        plainParts.push(rowsText.join('\n'));
+      }
+    });
+    return {
+      plain: plainParts.join('\n\n').trim(),
+      html: htmlParts.join('\n').trim(),
+    };
+  }, [currentNote]);
+
+  const handleCopyAllSelectedBlocks = useCallback(async () => {
+    triggerHaptic('medium');
+    const { plain, html } = buildNotePlainTextAndHtml();
+    try {
+      if (navigator.clipboard && window.ClipboardItem) {
+        const item = new ClipboardItem({
+          'text/plain': new Blob([plain], { type: 'text/plain' }),
+          'text/html': new Blob([html || plain], { type: 'text/html' }),
+        });
+        await navigator.clipboard.write([item]);
+      } else {
+        await navigator.clipboard.writeText(plain);
+      }
+      window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('success');
+      setExportNotice('Copied!');
+      setTimeout(() => setExportNotice(null), 2000);
+    } catch (err) {
+      console.error(`COPY_ALL_BLOCKS_FAILED: ${(err as Error).message}`);
+    }
+    setIsAllBlocksSelected(false);
+  }, [buildNotePlainTextAndHtml]);
+
+  const handleSelectAllProgressive = useCallback(() => {
+    triggerHaptic('light');
+    if (isAllBlocksSelected) {
+      handleCopyAllSelectedBlocks();
+      return;
+    }
+    const sel = window.getSelection();
+    const activeEl = document.activeElement as HTMLElement | null;
+    const editable = activeEl?.closest<HTMLElement>('[contenteditable="true"]');
+
+    const wasBlockAlreadySelected =
+      (singleBlockSelectedRef.current.blockIndex === focusedBlockIndex &&
+        Date.now() - singleBlockSelectedRef.current.time < 15000) ||
+      isCurrentFieldFullySelected();
+
+    if (!wasBlockAlreadySelected) {
+      if (activeEl && (activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'INPUT')) {
+        const inputEl = activeEl as HTMLInputElement | HTMLTextAreaElement;
+        if ((inputEl.value || '').trim().length > 0) {
+          inputEl.select();
+          singleBlockSelectedRef.current = { blockIndex: focusedBlockIndex, time: Date.now() };
+          return;
+        }
+      } else if (editable && sel) {
+        const normTotal = (editable.textContent || '').replace(/[\s\u200B-\u200D\uFEFF]/g, '');
+        if (normTotal.length > 0) {
+          const range = document.createRange();
+          range.selectNodeContents(editable);
+          sel.removeAllRanges();
+          sel.addRange(range);
+          singleBlockSelectedRef.current = { blockIndex: focusedBlockIndex, time: Date.now() };
+          return;
+        }
+      }
+    }
+
+    activateAllBlocksSelection();
+  }, [
+    isAllBlocksSelected,
+    handleCopyAllSelectedBlocks,
+    focusedBlockIndex,
+    isCurrentFieldFullySelected,
+    activateAllBlocksSelection,
+  ]);
+
+  useEffect(() => {
+    const handleSelectionTrack = () => {
+      if (isAllBlocksSelected) return;
+      if (isCurrentFieldFullySelected()) {
+        singleBlockSelectedRef.current = { blockIndex: focusedBlockIndex, time: Date.now() };
+      }
+    };
+
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('[data-modal="true"]')) return;
+
+      if (e.key === 'Control' || e.key === 'Meta' || e.keyCode === 17 || e.keyCode === 91) {
+        lastCtrlKeyTimeRef.current = Date.now();
+        return;
+      }
+
+      const isAKey =
+        e.key?.toLowerCase() === 'a' ||
+        e.code === 'KeyA' ||
+        e.keyCode === 65 ||
+        e.which === 65 ||
+        e.key === '\u0001';
+      const isCKey =
+        e.key?.toLowerCase() === 'c' ||
+        e.code === 'KeyC' ||
+        e.keyCode === 67 ||
+        e.which === 67;
+      const hasCtrlOrMeta =
+        e.ctrlKey ||
+        e.metaKey ||
+        Date.now() - lastCtrlKeyTimeRef.current < 2000;
+
+      if (hasCtrlOrMeta && isAKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        lastCtrlKeyTimeRef.current = 0;
+        handleSelectAllProgressive();
+        return;
+      }
+
+      if (isAllBlocksSelected && hasCtrlOrMeta && isCKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        lastCtrlKeyTimeRef.current = 0;
+        handleCopyAllSelectedBlocks();
+        return;
+      }
+
+      const ignoredKeys = [
+        'Shift',
+        'Alt',
+        'CapsLock',
+        'Tab',
+        'Escape',
+        'Enter',
+        'ArrowLeft',
+        'ArrowRight',
+        'ArrowUp',
+        'ArrowDown',
+        'Home',
+        'End',
+        'PageUp',
+        'PageDown',
+      ];
+
+      if (
+        !isAllBlocksSelected &&
+        !ignoredKeys.includes(e.key) &&
+        !isCKey &&
+        singleBlockSelectedRef.current.blockIndex === focusedBlockIndex &&
+        Date.now() - singleBlockSelectedRef.current.time < 15000 &&
+        (hasCtrlOrMeta || e.keyCode === 229 || e.key === 'Unidentified')
+      ) {
+        const activeEl = document.activeElement as HTMLElement | null;
+        const editable = activeEl?.closest<HTMLElement>('[contenteditable="true"]');
+        const beforeText = editable
+          ? editable.textContent || ''
+          : (activeEl as HTMLInputElement | HTMLTextAreaElement)?.value || '';
+        didCopyOrCutRef.current = false;
+        window.setTimeout(() => {
+          if (didCopyOrCutRef.current) return;
+          const afterText = editable
+            ? editable.textContent || ''
+            : (activeEl as HTMLInputElement | HTMLTextAreaElement)?.value || '';
+          if (beforeText.length > 0 && beforeText === afterText && isCurrentFieldFullySelected()) {
+            activateAllBlocksSelection();
+          }
+        }, 35);
+      }
+
+      if (isAllBlocksSelected) {
+        if (e.key === 'Escape') {
+          setIsAllBlocksSelected(false);
+          return;
+        }
+        if (e.key === 'Backspace' || e.key === 'Delete') {
+          e.preventDefault();
+          triggerHaptic('medium');
+          setIsAllBlocksSelected(false);
+          persistChange(
+            {
+              ...currentNote,
+              blocks: [{ id: `p-${Date.now()}`, type: 'paragraph', text: '' }],
+            },
+            true
+          );
+          setFocusedBlockIndex(0);
+        }
+      }
+    };
+
+    const handleGlobalCopy = (e: ClipboardEvent) => {
+      didCopyOrCutRef.current = true;
+      if (!isAllBlocksSelected) return;
+      e.preventDefault();
+      const { plain, html } = buildNotePlainTextAndHtml();
+      e.clipboardData?.setData('text/plain', plain);
+      if (html) e.clipboardData?.setData('text/html', html);
+      window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('success');
+      setExportNotice('Copied!');
+      setTimeout(() => setExportNotice(null), 2000);
+      setIsAllBlocksSelected(false);
+    };
+
+    const handleGlobalCut = () => {
+      didCopyOrCutRef.current = true;
+    };
+
+    document.addEventListener('selectionchange', handleSelectionTrack);
+    window.addEventListener('keydown', handleGlobalKeyDown, true);
+    document.addEventListener('copy', handleGlobalCopy);
+    document.addEventListener('cut', handleGlobalCut);
+    return () => {
+      document.removeEventListener('selectionchange', handleSelectionTrack);
+      window.removeEventListener('keydown', handleGlobalKeyDown, true);
+      document.removeEventListener('copy', handleGlobalCopy);
+      document.removeEventListener('cut', handleGlobalCut);
+    };
+  }, [
+    isAllBlocksSelected,
+    focusedBlockIndex,
+    isCurrentFieldFullySelected,
+    handleSelectAllProgressive,
+    handleCopyAllSelectedBlocks,
+    activateAllBlocksSelection,
+    buildNotePlainTextAndHtml,
+    currentNote,
+  ]);
 
   const handleParagraphSplit = (index: number, leftHtml: string, rightHtml: string) => {
     triggerHaptic('light');
     const currentBlock = currentNote.blocks[index];
     if (!currentBlock || currentBlock.type !== 'paragraph') return;
-
     captureFlipPositions();
     const newBlockId = `p-${Date.now()}`;
     const updatedCurrent: ContentBlock = {
@@ -1193,7 +2125,6 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
       type: 'paragraph',
       text: rightHtml,
     };
-
     const nextBlocks = [
       ...currentNote.blocks.slice(0, index),
       updatedCurrent,
@@ -2043,8 +2974,16 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
         className="opacity-0 absolute -z-10 w-0 h-0 pointer-events-none"
         tabIndex={-1}
       />
-      <div className="sticky top-0 z-30 bg-[#FAF8F5]/95 safe-header-box pb-2 border-b border-cream-divider flex flex-col gap-2">
-        <div className="flex items-center justify-between">
+      <input
+        ref={csvInputRef}
+        type="file"
+        accept=".csv,text/csv,application/vnd.ms-excel"
+        onChange={handleCsvFileSelected}
+        className="opacity-0 absolute -z-10 w-0 h-0 pointer-events-none"
+        tabIndex={-1}
+      />
+      <div className="sticky top-0 z-30 bg-[#FAF8F5]/95 safe-header-box pb-2 -mx-6 px-6 border-b border-cream-divider flex flex-col gap-2 shrink-0">
+        <div className="flex items-center justify-between shrink-0">
           <div className="flex items-center gap-1.5">
             <button
               onClick={() => {
@@ -2281,13 +3220,24 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
   </div>
 )}
 {activeToolbarTab === 'table' && (
-            <button
-              onClick={() => appendBlockWithParagraph('table')}
-              className="px-3 py-1 rounded-full bg-warm-accent text-white text-xs font-medium flex items-center gap-1 shrink-0 physics-bounce"
-            >
-              <span className="material-symbols-outlined text-[14px]">table_rows</span>
-              <span>{t('tool_table')}</span>
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => appendBlockWithParagraph('table')}
+                className="px-3 py-1 rounded-full bg-warm-accent text-white text-xs font-medium flex items-center gap-1 shrink-0 physics-bounce"
+              >
+                <span className="material-symbols-outlined text-[14px]">table_rows</span>
+                <span>{t('tool_table')}</span>
+              </button>
+              <button
+                type="button"
+                onClick={triggerImportCsv}
+                className="px-2.5 py-1 rounded-full bg-cream-surface text-warm-text text-xs font-medium flex items-center gap-1 shrink-0 physics-bounce"
+              >
+                <span className="material-symbols-outlined text-[14px] text-warm-accent">upload_file</span>
+                <span>{t('tool_import_csv')}</span>
+              </button>
+            </>
           )}
 
           {activeToolbarTab === 'objects' && (
@@ -2388,12 +3338,16 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
          </div>
        )}
 
-      <div className="flex flex-col pt-3">
+      <div className="flex flex-col pt-3 shrink-0">
         <textarea
           rows={1}
           value={currentNote.title}
           placeholder={t('title_placeholder')}
-          onFocus={() => setFocusedBlockIndex(null)}
+          onFocus={() => {
+            setIsAllBlocksSelected(false);
+            singleBlockSelectedRef.current = { blockIndex: null, time: 0 };
+            setFocusedBlockIndex(null);
+          }}
           onInput={(e) => autoResize(e.currentTarget)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
@@ -2418,22 +3372,38 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
               ref={(el) => {
                 blockElementRefs.current[block.id] = el;
               }}
-              className="relative group flex items-start gap-1 w-full min-w-0 animate-block-enter"
+              onPointerDown={() => {
+                singleBlockSelectedRef.current = { blockIndex: null, time: 0 };
+              }}
+              onClick={() => {
+                if (isAllBlocksSelected) setIsAllBlocksSelected(false);
+              }}
+              className={`relative group flex items-start gap-1 w-full min-w-0 animate-block-enter transition-colors rounded-lg ${
+                isAllBlocksSelected ? 'bg-warm-accent/10 ring-1 ring-inset ring-warm-accent/30 px-2 py-0.5' : ''
+              }`}
             >
               <div className="flex-1 min-w-0 w-full">
                 {block.type === 'paragraph' && (
                   <EditableBlock
                     html={block.text}
                     placeholder={t('paragraph_placeholder')}
-                    onFocus={() => setFocusedBlockIndex(index)}
+                    onFocus={() => {
+                      setIsAllBlocksSelected(false);
+                      singleBlockSelectedRef.current = { blockIndex: null, time: 0 };
+                      setFocusedBlockIndex(index);
+                    }}
                     onAnchorClick={(href) => {
                       if (href.startsWith('#')) {
                         const targetId = href.replace(/^#chapter-/, '').replace(/^#/, '');
                         scrollToHeading(targetId);
                       }
                     }}
-                    onChange={(newHtml) => updateBlock(index, { ...block, text: newHtml })}
+                    onChange={(newHtml) => {
+                      singleBlockSelectedRef.current = { blockIndex: null, time: 0 };
+                      updateBlock(index, { ...block, text: newHtml });
+                    }}
                     onKeyDown={(e) => handleParagraphKeyDown(e, index)}
+                    onSmartPasteBlocks={(pastedBlocks) => handleSmartPasteBlocks(index, pastedBlocks)}
                     className="w-full text-[15px] leading-relaxed text-warm-text bg-transparent border-none focus:outline-none min-h-[24px] py-0.5"
                   />
                 )}
@@ -3054,8 +4024,8 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                                   <td
                                     key={cIdx}
                                     style={{ outline: 'none' }}
-                                    className={`p-0 relative min-w-0 outline-none ${
-                                      (block.cells[0]?.length || 0) > 2 ? 'min-w-[100px]' : ''
+                                    className={`p-0 relative align-top outline-none ${
+                                      (block.cells[0]?.length || 0) > 2 ? 'min-w-[110px] max-w-[220px]' : 'min-w-0'
                                     } ${
                                       block.is_bordered
                                         ? 'border border-cream-divider'
@@ -3080,7 +4050,9 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                                         );
                                         updateBlock(index, { ...block, cells: nextCells }, false);
                                       }}
-                                      className={`w-full min-w-0 bg-transparent border-none outline-none focus:outline-none focus:ring-0 text-warm-text font-medium transition-all min-h-[22px] ${
+                                      className={`w-full min-w-0 break-words leading-relaxed bg-transparent border-none outline-none focus:outline-none focus:ring-0 text-warm-text font-medium transition-all min-h-[22px] ${
+                                        (block.cells[0]?.length || 0) > 2 ? 'max-w-[220px]' : ''
+                                      } ${
                                         block.is_compact ? 'px-1.5 py-0.5 text-[11px]' : 'px-2.5 py-1.5 text-xs'
                                       } ${
                                         col.align === 'center' ? 'text-center' : col.align === 'right' ? 'text-right' : 'text-left'
@@ -3444,7 +4416,7 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                 )}
                   </div>
 
-              {(focusedBlockIndex === index || block.type === 'button_row') && (
+              {!isAllBlocksSelected && (focusedBlockIndex === index || block.type === 'button_row') && (
                 <div className="absolute right-0 -top-3 z-10 flex items-center gap-1 bg-[#FAF8F5] border border-cream-divider/80 px-1.5 py-0.5 rounded-full shadow-sm animate-page-fade">
                   <button
                     onMouseDown={(e) => e.preventDefault()}
@@ -3479,9 +4451,7 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
         </div>
       </div>
 
-      
-
-      {isEditorActive && !showExportModal && !editingButtonModal && !timePickerModal.isOpen && !linkModal.isOpen &&
+      {(isEditorActive || isAllBlocksSelected) && !showExportModal && !editingButtonModal && !timePickerModal.isOpen && !linkModal.isOpen &&
         createPortal(
           <div
             data-format-bar="true"
@@ -3492,8 +4462,8 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
                 : 'calc(max(var(--tg-content-bottom, 0px), var(--tg-safe-bottom, 0px), env(safe-area-inset-bottom, 0px)) + 12px)',
             }}
           >
-            <div className="pointer-events-auto flex items-center p-1 rounded-full bg-[#F5F1EB] border border-cream-divider shadow-md max-w-full overflow-hidden">
-              <div className="flex items-center gap-0.5 overflow-x-auto no-scrollbar px-0.5">
+            <div className="pointer-events-auto flex items-center p-1 rounded-full bg-[#F5F1EB] border border-cream-divider shadow-md max-w-full min-w-0 overflow-hidden">
+              <div className="flex items-center gap-0.5 overflow-x-auto no-scrollbar px-1 min-w-0 max-w-full">
                 <div className="flex items-center gap-0.5 shrink-0">
                   <button
                     onPointerDown={(e) => e.preventDefault()}
@@ -3616,7 +4586,22 @@ const handleSlideNav = (blockId: string, direction: 'prev' | 'next', total: numb
 
                 <div className="w-[1px] h-3.5 bg-cream-divider mx-0.5 shrink-0" />
 
-                <div className="flex items-center shrink-0">
+                <div className="flex items-center gap-0.5 shrink-0">
+                  <button
+                    onPointerDown={(e) => e.preventDefault()}
+                    onClick={handleSelectAllProgressive}
+                    title={isAllBlocksSelected ? 'Copy All Blocks' : t('select_all')}
+                    className={`flex items-center justify-center h-7 px-2 rounded-full transition-colors shrink-0 gap-1 ${
+                      isAllBlocksSelected
+                        ? 'bg-warm-accent text-[#FAF8F5] text-[11px] font-semibold'
+                        : 'w-7 text-warm-muted hover:text-warm-text active:bg-cream-divider'
+                    }`}
+                  >
+                    <span className="material-symbols-outlined text-[15px] leading-none">
+                      {isAllBlocksSelected ? 'content_copy' : 'select_all'}
+                    </span>
+                    {isAllBlocksSelected && <span>Copy All</span>}
+                  </button>
                   <button
                     onPointerDown={(e) => e.preventDefault()}
                     onClick={handleClearFormatting}
