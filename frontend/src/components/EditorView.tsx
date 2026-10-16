@@ -2199,6 +2199,205 @@ const [isAllBlocksSelected, setIsAllBlocksSelected] = useState<boolean>(false);
     }
   };
 
+  interface BlockPresetItem {
+    id: string;
+    name: string;
+    blockType: 'button_row' | 'footer';
+    align?: 'left' | 'center' | 'right';
+    full_width?: boolean;
+    buttons?: {
+      text: string;
+      style: 'default' | 'primary' | 'success' | 'danger';
+      type: 'url' | 'copy_text';
+      value: string;
+    }[];
+    text?: string;
+  }
+
+  const getPresetStorageKey = (): string => {
+    const userId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id;
+    return userId ? `notigram_block_presets_${userId}` : 'notigram_block_presets_guest';
+  };
+
+  const [blockPresets, setBlockPresets] = useState<BlockPresetItem[]>(() => {
+    try {
+      const raw = localStorage.getItem(getPresetStorageKey());
+      return raw ? (JSON.parse(raw) as BlockPresetItem[]) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [showPresetMenu, setShowPresetMenu] = useState<boolean>(false);
+  const [savedPresetBlockId, setSavedPresetBlockId] = useState<string | null>(null);
+  const [renamingPresetId, setRenamingPresetId] = useState<string | null>(null);
+  const [renamingPresetValue, setRenamingPresetValue] = useState<string>('');
+  const presetLongPressTimerRef = useRef<number | null>(null);
+  const presetLongPressTriggeredRef = useRef<boolean>(false);
+  const toolbarScrollRef = useRef<HTMLDivElement>(null);
+
+  const handleTogglePresetToolbar = (open: boolean) => {
+    triggerHaptic('light');
+    setRenamingPresetId(null);
+    setShowPresetMenu(open);
+    setTimeout(() => {
+      if (toolbarScrollRef.current) {
+        toolbarScrollRef.current.scrollTo({
+          left: 0,
+          behavior: 'smooth',
+        });
+      }
+    }, 20);
+  };
+
+  const handleSaveBlockPreset = (block: ContentBlock) => {
+    if (block.type !== 'button_row' && block.type !== 'footer') return;
+    triggerHaptic('medium');
+    const cleanNoteTitle = currentNote.title.trim();
+    let newPreset: BlockPresetItem;
+
+    if (block.type === 'button_row') {
+      const firstButtonText = block.buttons.find((b) => b.text.trim())?.text.trim() || '';
+      const autoName = (cleanNoteTitle || firstButtonText || t('tool_button')).slice(0, 42);
+      newPreset = {
+        id: `preset-${Date.now()}`,
+        name: autoName,
+        blockType: 'button_row',
+        align: block.align || 'center',
+        full_width: Boolean(block.full_width),
+        buttons: block.buttons.map((b) => ({
+          text: b.text,
+          style: b.style,
+          type: b.type,
+          value: b.value,
+        })),
+      };
+    } else {
+      const cleanFooter = block.text
+        .replace(/<[^>]*>/g, '')
+        .replace(/&nbsp;/gi, ' ')
+        .trim();
+      const autoName = (cleanNoteTitle || cleanFooter || t('tool_footer')).slice(0, 42);
+      newPreset = {
+        id: `preset-${Date.now()}`,
+        name: autoName,
+        blockType: 'footer',
+        text: block.text,
+      };
+    }
+
+    const nextPresets = [newPreset, ...blockPresets].slice(0, 15);
+    setBlockPresets(nextPresets);
+    localStorage.setItem(getPresetStorageKey(), JSON.stringify(nextPresets));
+    window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('success');
+    setSavedPresetBlockId(block.id);
+    setTimeout(() => {
+      setSavedPresetBlockId((prev) => (prev === block.id ? null : prev));
+    }, 1800);
+  };
+
+  const handlePresetTouchStart = (preset: BlockPresetItem) => {
+    if (renamingPresetId === preset.id) return;
+    presetLongPressTriggeredRef.current = false;
+    if (presetLongPressTimerRef.current) {
+      clearTimeout(presetLongPressTimerRef.current);
+    }
+    presetLongPressTimerRef.current = window.setTimeout(() => {
+      presetLongPressTriggeredRef.current = true;
+      triggerHaptic('heavy');
+      setRenamingPresetId(preset.id);
+      setRenamingPresetValue(preset.name);
+    }, 420);
+  };
+
+  const handlePresetTouchEnd = () => {
+    if (presetLongPressTimerRef.current) {
+      clearTimeout(presetLongPressTimerRef.current);
+      presetLongPressTimerRef.current = null;
+    }
+  };
+
+  const handleCommitRenamePreset = (presetId: string) => {
+    const trimmed = renamingPresetValue.trim();
+    if (trimmed) {
+      triggerHaptic('light');
+      const nextPresets = blockPresets.map((p) =>
+        p.id === presetId ? { ...p, name: trimmed.slice(0, 42) } : p
+      );
+      setBlockPresets(nextPresets);
+      localStorage.setItem(getPresetStorageKey(), JSON.stringify(nextPresets));
+    }
+    setRenamingPresetId(null);
+    setRenamingPresetValue('');
+  };
+
+  const handleDeleteBlockPreset = (presetId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    triggerHaptic('medium');
+    if (!window.confirm(t('delete_preset_confirm'))) return;
+    const nextPresets = blockPresets.filter((p) => p.id !== presetId);
+    setBlockPresets(nextPresets);
+    localStorage.setItem(getPresetStorageKey(), JSON.stringify(nextPresets));
+    if (renamingPresetId === presetId) {
+      setRenamingPresetId(null);
+    }
+  };
+
+  const buildBlockFromPreset = (preset: BlockPresetItem, newBlockId: string): ContentBlock => {
+    if (preset.blockType === 'button_row') {
+      return {
+        id: newBlockId,
+        type: 'button_row',
+        align: preset.align || 'center',
+        full_width: Boolean(preset.full_width),
+        buttons: (preset.buttons || []).map((btn, idx) => ({
+          id: `btn-${Date.now()}-${idx}`,
+          text: btn.text,
+          style: btn.style,
+          type: btn.type,
+          value: btn.value,
+        })),
+      };
+    }
+    return {
+      id: newBlockId,
+      type: 'footer',
+      text: preset.text || '',
+    };
+  };
+
+  const handleInsertBlockPreset = (preset: BlockPresetItem) => {
+    triggerHaptic('medium');
+    setShowPresetMenu(false);
+    const bId1 = `b-preset-${Date.now()}-1`;
+    const bId2 = `b-preset-${Date.now()}-2`;
+    const primaryBlock = buildBlockFromPreset(preset, bId1);
+    const trailingParagraph: ContentBlock = {
+      id: bId2,
+      type: 'paragraph',
+      text: '',
+    };
+    const targetIndex =
+      focusedBlockIndex !== null && focusedBlockIndex >= 0 && focusedBlockIndex < currentNote.blocks.length
+        ? focusedBlockIndex + 1
+        : currentNote.blocks.length;
+
+    captureFlipPositions();
+    const nextBlocks = [
+      ...currentNote.blocks.slice(0, targetIndex),
+      primaryBlock,
+      trailingParagraph,
+      ...currentNote.blocks.slice(targetIndex),
+    ];
+    persistChange({ ...currentNote, blocks: nextBlocks }, true);
+    setFocusedBlockIndex(targetIndex);
+    setTimeout(() => {
+      blockElementRefs.current[bId1]?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'nearest',
+      });
+    }, 60);
+  };
+
   const [slashMenu, setSlashMenu] = useState<{
     blockIndex: number;
     query: string;
@@ -2455,6 +2654,17 @@ const [isAllBlocksSelected, setIsAllBlocksSelected] = useState<boolean>(false);
       kind: 'action' as const,
       actionType: 'time' as const,
     },
+    ...blockPresets.map((preset) => ({
+      id: preset.id,
+      shortcut: '/preset',
+      icon: 'widgets',
+      label: preset.name,
+      category: t('tool_preset'),
+      keywords: ['preset', preset.name.toLowerCase(), preset.blockType],
+      disabled: false,
+      kind: 'preset' as const,
+      presetItem: preset,
+    })),
   ];
 
   const filteredSlashCommands = slashMenu
@@ -2477,6 +2687,25 @@ const [isAllBlocksSelected, setIsAllBlocksSelected] = useState<boolean>(false);
 
     const currentBlock = currentNote.blocks[index];
     if (!currentBlock) return;
+
+    if (cmd.kind === 'preset') {
+      const bId1 = `b-preset-${Date.now()}-1`;
+      const bId2 = `b-preset-${Date.now()}-2`;
+      const primaryBlock = buildBlockFromPreset(cmd.presetItem, bId1);
+      const needsTrailing = index === currentNote.blocks.length - 1;
+      const replacementBlocks: ContentBlock[] = needsTrailing
+        ? [primaryBlock, { id: bId2, type: 'paragraph', text: '' }]
+        : [primaryBlock];
+      captureFlipPositions();
+      const nextBlocks = [
+        ...currentNote.blocks.slice(0, index),
+        ...replacementBlocks,
+        ...currentNote.blocks.slice(index + 1),
+      ];
+      persistChange({ ...currentNote, blocks: nextBlocks }, true);
+      setFocusedBlockIndex(index);
+      return;
+    }
 
     if (cmd.kind === 'action') {
       const currentEl = blockElementRefs.current[currentBlock.id];
@@ -3547,6 +3776,7 @@ const [isAllBlocksSelected, setIsAllBlocksSelected] = useState<boolean>(false);
                 key={tabKey}
                 onClick={() => {
                   triggerHaptic();
+                  setShowPresetMenu(false);
                   setActiveToolbarTab(tabKey);
                 }}
                 className={`pb-1 px-1 font-medium text-xs transition-colors relative ${
@@ -3562,7 +3792,15 @@ const [isAllBlocksSelected, setIsAllBlocksSelected] = useState<boolean>(false);
           })}
         </div>
 
-        <div key={activeToolbarTab} className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 animate-toolbar-fade">
+        <div
+          key={activeToolbarTab === 'objects' && showPresetMenu ? 'objects-presets' : activeToolbarTab}
+          ref={activeToolbarTab === 'objects' && showPresetMenu ? undefined : toolbarScrollRef}
+          className={`flex items-center gap-1.5 py-0.5 animate-toolbar-fade ${
+            activeToolbarTab === 'objects' && showPresetMenu
+              ? 'w-full min-w-0 overflow-hidden'
+              : 'overflow-x-auto no-scrollbar scroll-smooth'
+          }`}
+        >
           {activeToolbarTab === 'text' && (
             <>
               <button
@@ -3699,50 +3937,167 @@ const [isAllBlocksSelected, setIsAllBlocksSelected] = useState<boolean>(false);
           )}
 
           {activeToolbarTab === 'objects' && (
-            <>
-              <button
-                onClick={() => appendBlockWithParagraph('code')}
-                className="px-2.5 py-1 rounded-full bg-cream-surface text-xs font-medium flex items-center gap-1 shrink-0 physics-bounce"
-              >
-                <span className="material-symbols-outlined text-[14px]">code</span>
-                <span>{t('tool_code')}</span>
-              </button>
-              <button
-                onClick={() => appendBlockWithParagraph('math')}
-                className="px-2.5 py-1 rounded-full bg-cream-surface text-xs font-medium flex items-center gap-1 shrink-0 physics-bounce"
-              >
-                <span className="material-symbols-outlined text-[14px]">functions</span>
-                <span>{t('tool_math')}</span>
-              </button>
-              <button
-                onClick={() => appendBlockWithParagraph('details')}
-                className="px-2.5 py-1 rounded-full bg-cream-surface text-xs font-medium flex items-center gap-1 shrink-0 physics-bounce"
-              >
-                <span className="material-symbols-outlined text-[14px]">unfold_more</span>
-                <span>{t('tool_details')}</span>
-              </button>
-              <button
-                onClick={() => appendBlockWithParagraph('divider')}
-                className="px-2.5 py-1 rounded-full bg-cream-surface text-xs font-medium flex items-center gap-1 shrink-0 physics-bounce"
-              >
-                <span className="material-symbols-outlined text-[14px]">horizontal_rule</span>
-                <span>{t('tool_divider')}</span>
-              </button>
-              <button
-                onClick={() => appendBlockWithParagraph('button_row')}
-                className="px-2.5 py-1 rounded-full bg-cream-surface text-xs font-medium flex items-center gap-1 shrink-0 physics-bounce"
-              >
-                <span className="material-symbols-outlined text-[14px] text-warm-accent">smart_button</span>
-                <span>{t('tool_button')}</span>
-              </button>
-              <button
-                onClick={() => appendBlockWithParagraph('footer')}
-                className="px-2.5 py-1 rounded-full bg-cream-surface text-xs font-medium flex items-center gap-1 shrink-0 physics-bounce"
-              >
-                <span className="material-symbols-outlined text-[14px] text-warm-accent">short_text</span>
-                <span>{t('tool_footer')}</span>
-              </button>
-            </>
+            showPresetMenu ? (
+              <div className="flex items-center gap-1.5 w-full min-w-0">
+                <button
+                  type="button"
+                  onClick={() => handleTogglePresetToolbar(false)}
+                  className="w-7 h-7 rounded-full bg-warm-accent text-[#FAF8F5] flex items-center justify-center shrink-0 physics-bounce shadow-xs"
+                >
+                  <span className="material-symbols-outlined text-[15px] leading-none">arrow_back</span>
+                </button>
+                <div className="w-[1px] h-4 bg-cream-divider shrink-0" />
+                <div
+                  ref={toolbarScrollRef}
+                  className="flex-1 min-w-0 flex items-center gap-1.5 overflow-x-auto no-scrollbar scroll-smooth py-0.5"
+                >
+                  {blockPresets.length === 0 ? (
+                    <span className="text-[11px] text-warm-subtle italic px-2.5 py-1 rounded-full bg-cream-surface/60 border border-cream-divider/60 whitespace-nowrap shrink-0">
+                      {t('preset_empty')}
+                    </span>
+                  ) : (
+                    blockPresets.map((preset) => {
+                      const isRenaming = renamingPresetId === preset.id;
+                      return (
+                        <div
+                          key={preset.id}
+                          onTouchStart={() => handlePresetTouchStart(preset)}
+                          onTouchEnd={handlePresetTouchEnd}
+                          onTouchMove={handlePresetTouchEnd}
+                          onMouseDown={() => handlePresetTouchStart(preset)}
+                          onMouseUp={handlePresetTouchEnd}
+                          onMouseLeave={handlePresetTouchEnd}
+                          onContextMenu={(e) => e.preventDefault()}
+                          onClick={() => {
+                            if (isRenaming || presetLongPressTriggeredRef.current) {
+                              presetLongPressTriggeredRef.current = false;
+                              return;
+                            }
+                            handleInsertBlockPreset(preset);
+                          }}
+                          className={`flex items-center gap-1.5 pl-2.5 pr-1 py-1 rounded-full border text-[11px] font-medium text-warm-text shrink-0 transition-all ${
+                            isRenaming
+                              ? 'bg-[#FAF8F5] border-warm-accent ring-1 ring-warm-accent/30'
+                              : 'bg-cream-surface hover:bg-warm-accent-light/60 border-cream-divider/80 cursor-pointer physics-bounce'
+                          }`}
+                        >
+                          <span className="material-symbols-outlined text-[13px] text-warm-accent leading-none shrink-0">
+                            {preset.blockType === 'button_row' ? 'smart_button' : 'short_text'}
+                          </span>
+                          {isRenaming ? (
+                            <div
+                              onClick={(e) => e.stopPropagation()}
+                              className="flex items-center gap-1"
+                            >
+                              <input
+                                type="text"
+                                value={renamingPresetValue}
+                                placeholder={t('preset_name_placeholder')}
+                                autoFocus
+                                onChange={(e) => setRenamingPresetValue(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    handleCommitRenamePreset(preset.id);
+                                  } else if (e.key === 'Escape') {
+                                    e.preventDefault();
+                                    setRenamingPresetId(null);
+                                  }
+                                }}
+                                onBlur={() => handleCommitRenamePreset(preset.id)}
+                                className="w-28 bg-transparent text-[11px] font-medium text-warm-text focus:outline-none border-b border-warm-accent/60 px-0.5"
+                              />
+                              <button
+                                type="button"
+                                onMouseDown={(e) => e.preventDefault()}
+                                onPointerDown={(e) => e.preventDefault()}
+                                onClick={() => handleCommitRenamePreset(preset.id)}
+                                className="w-4 h-4 rounded-full bg-warm-accent text-white flex items-center justify-center shrink-0"
+                              >
+                                <span className="material-symbols-outlined text-[11px] leading-none">check</span>
+                              </button>
+                            </div>
+                          ) : (
+                            <>
+                              <span className="max-w-[130px] truncate leading-tight select-none">
+                                {preset.name}
+                              </span>
+                              <button
+                                type="button"
+                                onTouchStart={(e) => e.stopPropagation()}
+                                onMouseDown={(e) => e.stopPropagation()}
+                                onClick={(e) => handleDeleteBlockPreset(preset.id, e)}
+                                className="w-4 h-4 rounded-full flex items-center justify-center text-warm-subtle hover:text-red-600 hover:bg-cream-divider/60 transition-colors shrink-0"
+                              >
+                                <span className="material-symbols-outlined text-[12px] leading-none">close</span>
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            ) : (
+              <>
+                <button
+                  onClick={() => appendBlockWithParagraph('code')}
+                  className="px-2.5 py-1 rounded-full bg-cream-surface text-xs font-medium flex items-center gap-1 shrink-0 physics-bounce"
+                >
+                  <span className="material-symbols-outlined text-[14px]">code</span>
+                  <span>{t('tool_code')}</span>
+                </button>
+                <button
+                  onClick={() => appendBlockWithParagraph('math')}
+                  className="px-2.5 py-1 rounded-full bg-cream-surface text-xs font-medium flex items-center gap-1 shrink-0 physics-bounce"
+                >
+                  <span className="material-symbols-outlined text-[14px]">functions</span>
+                  <span>{t('tool_math')}</span>
+                </button>
+                <button
+                  onClick={() => appendBlockWithParagraph('details')}
+                  className="px-2.5 py-1 rounded-full bg-cream-surface text-xs font-medium flex items-center gap-1 shrink-0 physics-bounce"
+                >
+                  <span className="material-symbols-outlined text-[14px]">unfold_more</span>
+                  <span>{t('tool_details')}</span>
+                </button>
+                <button
+                  onClick={() => appendBlockWithParagraph('divider')}
+                  className="px-2.5 py-1 rounded-full bg-cream-surface text-xs font-medium flex items-center gap-1 shrink-0 physics-bounce"
+                >
+                  <span className="material-symbols-outlined text-[14px]">horizontal_rule</span>
+                  <span>{t('tool_divider')}</span>
+                </button>
+                <button
+                  onClick={() => appendBlockWithParagraph('button_row')}
+                  className="px-2.5 py-1 rounded-full bg-cream-surface text-xs font-medium flex items-center gap-1 shrink-0 physics-bounce"
+                >
+                  <span className="material-symbols-outlined text-[14px] text-warm-accent">smart_button</span>
+                  <span>{t('tool_button')}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleTogglePresetToolbar(true)}
+                  className="px-2.5 py-1 rounded-full bg-cream-surface text-warm-text text-xs font-medium flex items-center gap-1 shrink-0 physics-bounce"
+                >
+                  <span className="material-symbols-outlined text-[14px] text-warm-accent">widgets</span>
+                  <span>{t('tool_preset')}</span>
+                  {blockPresets.length > 0 && (
+                    <span className="text-[10px] font-mono text-warm-muted">
+                      {blockPresets.length}
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={() => appendBlockWithParagraph('footer')}
+                  className="px-2.5 py-1 rounded-full bg-cream-surface text-xs font-medium flex items-center gap-1 shrink-0 physics-bounce"
+                >
+                  <span className="material-symbols-outlined text-[14px] text-warm-accent">short_text</span>
+                  <span>{t('tool_footer')}</span>
+                </button>
+              </>
+            )
           )}
         </div>
       </div>
@@ -4782,6 +5137,24 @@ const [isAllBlocksSelected, setIsAllBlocksSelected] = useState<boolean>(false);
                         <span className="material-symbols-outlined text-[13px]">short_text</span>
                         <span>{t('tool_footer')}</span>
                       </span>
+                      {focusedBlockIndex === index && block.text.replace(/<[^>]*>/g, '').trim().length > 0 && (
+                        <button
+                          type="button"
+                          title={t('preset_save')}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onPointerDown={(e) => e.preventDefault()}
+                          onClick={() => handleSaveBlockPreset(block)}
+                          className={`w-6 h-6 rounded-full border flex items-center justify-center active:scale-90 transition-all select-none ${
+                            savedPresetBlockId === block.id
+                              ? 'bg-warm-accent border-warm-accent text-white'
+                              : 'bg-cream-surface border-cream-divider text-warm-accent hover:bg-warm-accent-light'
+                          }`}
+                        >
+                          <span className="material-symbols-outlined text-[13px] leading-none">
+                            {savedPresetBlockId === block.id ? 'check' : 'save'}
+                          </span>
+                        </button>
+                      )}
                     </div>
                     <EditableBlock
                       html={block.text}
@@ -4792,6 +5165,7 @@ const [isAllBlocksSelected, setIsAllBlocksSelected] = useState<boolean>(false);
                     />
                   </div>
                 )}
+
                 {block.type === 'button_row' && (
                   <div
                     onClick={() => setFocusedBlockIndex(index)}
@@ -4859,18 +5233,38 @@ const [isAllBlocksSelected, setIsAllBlocksSelected] = useState<boolean>(false);
                           <span className="material-symbols-outlined text-[14px]">format_align_right</span>
                         </button>
                       </div>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          addButtonToRow(index);
-                        }}
-                        disabled={block.buttons.length >= 3}
-                        className="px-2.5 py-1 rounded-full bg-cream-surface border border-cream-divider text-[11px] font-semibold text-warm-accent disabled:opacity-30 flex items-center gap-1 active:scale-95 transition-transform"
-                      >
-                        <span className="material-symbols-outlined text-[13px]">add</span>
-                        <span>{t('btn_add_to_row')}</span>
-                      </button>
+
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          title={t('preset_save')}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleSaveBlockPreset(block);
+                          }}
+                          className={`w-7 h-7 rounded-full border flex items-center justify-center active:scale-90 transition-all shrink-0 ${
+                            savedPresetBlockId === block.id
+                              ? 'bg-warm-accent border-warm-accent text-white'
+                              : 'bg-cream-surface border-cream-divider text-warm-accent hover:bg-warm-accent-light'
+                          }`}
+                        >
+                          <span className="material-symbols-outlined text-[15px] leading-none">
+                            {savedPresetBlockId === block.id ? 'check' : 'save'}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          title={t('btn_add_to_row')}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            addButtonToRow(index);
+                          }}
+                          disabled={block.buttons.length >= 3}
+                          className="w-7 h-7 rounded-full bg-cream-surface border border-cream-divider text-warm-accent hover:bg-warm-accent-light disabled:opacity-30 flex items-center justify-center active:scale-90 transition-all shrink-0"
+                        >
+                          <span className="material-symbols-outlined text-[16px] leading-none">add</span>
+                        </button>
+                      </div>
                     </div>
                     <div
                       className={`flex items-center gap-2 py-2 w-full ${

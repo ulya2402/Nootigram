@@ -157,5 +157,12 @@
   "time_insert": "Insert",
   "lang_modal_title": "Choose Language",
   "select_language": "Language",
-  "tool_heading": "Heading"
+  "tool_heading": "Heading",
+
+  "tool_preset": "Presets",
+  "preset_save": "Save Preset",
+  "preset_saved": "Saved!",
+  "preset_empty": "No saved presets yet.",
+  "preset_name_placeholder": "Preset name...",
+  "delete_preset_confirm": "Delete this preset?"
 }
