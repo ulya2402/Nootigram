@@ -189,7 +189,11 @@ const convertClipboardHtmlToMarkdown = (html: string): string => {
       const startAttr = Number(el.getAttribute('start') || 1);
       const items = Array.from(el.children)
         .filter((c) => c.tagName.toLowerCase() === 'li')
-        .map((li, idx) => `${startAttr + idx}.${Array.from(li.childNodes).map(walk).join('').replace(/\n+/g, ' ').trim()}`)
+        .map((li, idx) => {
+          const rawLiText = Array.from(li.childNodes).map(walk).join('').replace(/\n+/g, ' ').trim();
+          const cleanedLiText = rawLiText.replace(/^(?:\*\*|__)?\d+[\.\)](?:\*\*|__)?\s+/, '');
+          return `${startAttr + idx}. ${cleanedLiText}`;
+        })
         .join('\n');
       return `\n${items}\n\n`;
     }
@@ -235,6 +239,17 @@ const matchMarkdownHeading = (trimmedLine: string): { size: 1 | 2 | 3 | 4 | 5 | 
   const text = m[2].replace(/\*\*|__|~~|==|\|\||`/g, '').trim();
   if (!text) return null;
   return { size, text };
+};
+
+const ORDERED_LIST_LINE_REGEX = /^(?:\*\*|__)?\d+[\.\)](?:\*\*|__)?\s+/;
+const TASK_LIST_LINE_REGEX = /^[-*+•]\s+\[([ xX])\]\s+/;
+const BULLET_LIST_LINE_REGEX = /^[-*+•]\s+/;
+
+const stripOrderedListPrefix = (line: string): string => {
+  return line
+    .replace(/^(?:\*\*|__)?\d+[\.\)](?:\*\*|__)?\s+/, '')
+    .replace(/\*\*|__|~~|==|\|\||`/g, '')
+    .trim();
 };
 
 const parseMarkdownToContentBlocks = (markdown: string): ContentBlock[] => {
@@ -371,30 +386,54 @@ const parseMarkdownToContentBlocks = (markdown: string): ContentBlock[] => {
       continue;
     }
 
-    if (/^[-*+]\s+\[([ xX])\]\s+/.test(trimmed)) {
+    if (TASK_LIST_LINE_REGEX.test(trimmed)) {
       const items: TaskItem[] = [];
-      while (i < lines.length && /^[-*+]\s+\[([ xX])\]\s+/.test(cleanMarkdownLine(lines[i]))) {
-        const m = cleanMarkdownLine(lines[i]).match(/^[-*+]\s+\[([ xX])\]\s+(.*)$/);
-        if (m) {
-          items.push({
-            id: nextId('task'),
-            is_checked: m[1].toLowerCase() === 'x',
-            text: m[2].replace(/\*\*|__|~~|==|\|\||`/g, '').trim(),
-          });
+      while (i < lines.length) {
+        const curLine = cleanMarkdownLine(lines[i]);
+        if (!curLine) {
+          let lookahead = i + 1;
+          while (lookahead < lines.length && !cleanMarkdownLine(lines[lookahead])) lookahead++;
+          if (lookahead < lines.length && TASK_LIST_LINE_REGEX.test(cleanMarkdownLine(lines[lookahead]))) {
+            i = lookahead;
+            continue;
+          }
+          break;
         }
+        const m = curLine.match(/^[-*+•]\s+\[([ xX])\]\s+(.*)$/);
+        if (!m) break;
+        items.push({
+          id: nextId('task'),
+          is_checked: m[1].toLowerCase() === 'x',
+          text: m[2].replace(/\*\*|__|~~|==|\|\||`/g, '').trim(),
+        });
         i++;
       }
       blocks.push({ id: nextId('list'), type: 'list', style: 'task', items });
       continue;
     }
 
-    if (/^[-*+•]\s+/.test(trimmed)) {
+    if (BULLET_LIST_LINE_REGEX.test(trimmed)) {
       const items: TaskItem[] = [];
-      while (i < lines.length && /^[-*+•]\s+/.test(cleanMarkdownLine(lines[i])) && !/^[-*+]\s+\[([ xX])\]\s+/.test(cleanMarkdownLine(lines[i]))) {
+      while (i < lines.length) {
+        const curLine = cleanMarkdownLine(lines[i]);
+        if (!curLine) {
+          let lookahead = i + 1;
+          while (lookahead < lines.length && !cleanMarkdownLine(lines[lookahead])) lookahead++;
+          if (
+            lookahead < lines.length &&
+            BULLET_LIST_LINE_REGEX.test(cleanMarkdownLine(lines[lookahead])) &&
+            !TASK_LIST_LINE_REGEX.test(cleanMarkdownLine(lines[lookahead]))
+          ) {
+            i = lookahead;
+            continue;
+          }
+          break;
+        }
+        if (!BULLET_LIST_LINE_REGEX.test(curLine) || TASK_LIST_LINE_REGEX.test(curLine)) break;
         items.push({
           id: nextId('item'),
           is_checked: false,
-          text: cleanMarkdownLine(lines[i]).replace(/^[-*+•]\s+/, '').replace(/\*\*|__|~~|==|\|\||`/g, '').trim(),
+          text: curLine.replace(/^[-*+•]\s+/, '').replace(/\*\*|__|~~|==|\|\||`/g, '').trim(),
         });
         i++;
       }
@@ -402,13 +441,24 @@ const parseMarkdownToContentBlocks = (markdown: string): ContentBlock[] => {
       continue;
     }
 
-    if (/^\d+\.\s+/.test(trimmed)) {
+    if (ORDERED_LIST_LINE_REGEX.test(trimmed)) {
       const items: TaskItem[] = [];
-      while (i < lines.length && /^\d+\.\s+/.test(cleanMarkdownLine(lines[i]))) {
+      while (i < lines.length) {
+        const curLine = cleanMarkdownLine(lines[i]);
+        if (!curLine) {
+          let lookahead = i + 1;
+          while (lookahead < lines.length && !cleanMarkdownLine(lines[lookahead])) lookahead++;
+          if (lookahead < lines.length && ORDERED_LIST_LINE_REGEX.test(cleanMarkdownLine(lines[lookahead]))) {
+            i = lookahead;
+            continue;
+          }
+          break;
+        }
+        if (!ORDERED_LIST_LINE_REGEX.test(curLine)) break;
         items.push({
           id: nextId('item'),
           is_checked: false,
-          text: cleanMarkdownLine(lines[i]).replace(/^\d+\.\s+/, '').replace(/\*\*|__|~~|==|\|\||`/g, '').trim(),
+          text: stripOrderedListPrefix(curLine),
         });
         i++;
       }
@@ -425,8 +475,8 @@ const parseMarkdownToContentBlocks = (markdown: string): ContentBlock[] => {
         matchMarkdownHeading(curTrimmed) !== null ||
         /^(?:---|\*\*\*|___)$/.test(curTrimmed) ||
         /^>\s?/.test(curTrimmed) ||
-        /^[-*+•]\s+/.test(curTrimmed) ||
-        /^\d+\.\s+/.test(curTrimmed) ||
+        BULLET_LIST_LINE_REGEX.test(curTrimmed) ||
+        ORDERED_LIST_LINE_REGEX.test(curTrimmed) ||
         (curTrimmed.startsWith('|') && curTrimmed.endsWith('|'))
       ) {
         break;
@@ -477,19 +527,32 @@ const EditableBlock: React.FC<{
 
     const plainHasHeadings = /(?:^|\n)[ \t\u00A0\u200B]*#{1,6}[ \t\u00A0]+/.test(rawPlain);
     const htmlHasHeadings = /<h[1-6]\b|role=["']heading["']/i.test(rawHtml);
-    const hasMarkdownPatterns = /(?:^|\n)[ \t\u00A0\u200B]*(?:#{1,6}[ \t\u00A0]+|```|>\s?|[-*+][ \t\u00A0]+|\d+\.[ \t\u00A0]+|\|.+\||---)|\*\*[^*]+\*\*|__[^_]+__|~~[^~]+~~|==[^=]+==|\|\|[^|]+\|\||`[^`]+`|\[[^\]]+\]\([^)]+\)/.test(rawPlain);
+    const plainHasList = /(?:^|\n)[ \t\u00A0\u200B]*(?:[-*+•][ \t\u00A0]+|(?:\*\*|__)?\d+[\.\)](?:\*\*|__)?[ \t\u00A0]+)/.test(rawPlain);
+    const hasMarkdownPatterns = /(?:^|\n)[ \t\u00A0\u200B]*(?:#{1,6}[ \t\u00A0]+|```|>\s?|[-*+•][ \t\u00A0]+|(?:\*\*|__)?\d+[\.\)](?:\*\*|__)?[ \t\u00A0]+|\|.+\||---)|\*\*[^*]+\*\*|__[^_]+__|~~[^~]+~~|==[^=]+==|\|\|[^|]+\|\||`[^`]+`|\[[^\]]+\]\([^)]+\)/.test(rawPlain);
     const hasRichHtmlTags = /<(?:h[1-6]|b|strong|i|em|u|s|del|code|pre|ul|ol|li|blockquote|table|mark|a)\b/i.test(rawHtml);
 
-    const sourceMarkdown =
-      htmlHasHeadings && !plainHasHeadings
-        ? convertClipboardHtmlToMarkdown(rawHtml)
-        : hasMarkdownPatterns
-        ? rawPlain
-        : hasRichHtmlTags
-        ? convertClipboardHtmlToMarkdown(rawHtml)
-        : rawPlain;
+    let sourceMarkdown = rawPlain;
+    if (htmlHasHeadings && !plainHasHeadings) {
+      sourceMarkdown = convertClipboardHtmlToMarkdown(rawHtml);
+    } else if (hasRichHtmlTags && !hasMarkdownPatterns) {
+      sourceMarkdown = convertClipboardHtmlToMarkdown(rawHtml);
+    } else if (hasRichHtmlTags && !plainHasList && /<(?:ol|ul)\b/i.test(rawHtml)) {
+      sourceMarkdown = convertClipboardHtmlToMarkdown(rawHtml);
+    }
 
-    const parsedBlocks = parseMarkdownToContentBlocks(sourceMarkdown);
+    let parsedBlocks = parseMarkdownToContentBlocks(sourceMarkdown);
+    if (
+      parsedBlocks.length === 1 &&
+      parsedBlocks[0].type === 'paragraph' &&
+      rawHtml &&
+      sourceMarkdown === rawPlain
+    ) {
+      const htmlConverted = convertClipboardHtmlToMarkdown(rawHtml);
+      const retryBlocks = parseMarkdownToContentBlocks(htmlConverted);
+      if (retryBlocks.length > 1 || (retryBlocks.length === 1 && retryBlocks[0].type !== 'paragraph')) {
+        parsedBlocks = retryBlocks;
+      }
+    }
 
     if (onSmartPasteBlocks && (parsedBlocks.length > 1 || (parsedBlocks.length === 1 && parsedBlocks[0].type !== 'paragraph'))) {
       isSmartPastingRef.current = true;
@@ -539,7 +602,7 @@ const EditableBlock: React.FC<{
         if (
           onSmartPasteBlocks &&
           plainContent.length - prevLen > 12 &&
-          /(?:^|\n)[ \t\u00A0\u200B]*(?:#{1,6}\s+|```|\|.+\|)/.test(plainContent)
+          /(?:^|\n)[ \t\u00A0\u200B]*(?:#{1,6}\s+|```|\|.+\||[-*+•]\s+|(?:\*\*|__)?\d+[\.\)](?:\*\*|__)?\s+)/.test(plainContent)
         ) {
           const parsedBlocks = parseMarkdownToContentBlocks(plainContent);
           if (parsedBlocks.length > 1 || (parsedBlocks.length === 1 && parsedBlocks[0].type !== 'paragraph')) {
@@ -1874,11 +1937,12 @@ const [isAllBlocksSelected, setIsAllBlocksSelected] = useState<boolean>(false);
           b.style === 'task'
             ? `- [${it.is_checked ? 'x' : ' '}] ${it.text}`
             : b.style === 'ordered'
-            ? `${idx + 1}.${it.text}`
+            ? `${idx + 1}. ${it.text}`
             : `- ${it.text}`
         );
         plainParts.push(lines.join('\n'));
-        htmlParts.push(`<ul>${b.items.map((it) => `<li>${escapeHtmlEntities(it.text)}</li>`).join('')}</ul>`);
+        const listTag = b.style === 'ordered' ? 'ol' : 'ul';
+        htmlParts.push(`<${listTag}>${b.items.map((it) => `<li>${escapeHtmlEntities(it.text)}</li>`).join('')}</${listTag}>`);
       } else if (b.type === 'code') {
         plainParts.push(`\`\`\`${b.language || ''}\n${b.text}\n\`\`\``);
         htmlParts.push(`<pre><code>${escapeHtmlEntities(b.text)}</code></pre>`);
@@ -3406,30 +3470,6 @@ const [isAllBlocksSelected, setIsAllBlocksSelected] = useState<boolean>(false);
     (b): b is Extract<ContentBlock, { type: 'heading' }> => b.type === 'heading' && b.text.trim().length > 0
   );
 
-  const insertTocIntoNote = () => {
-    if (headingsList.length === 0) return;
-    triggerHaptic('medium');
-    setShowToc(false);
-    const tocItemsHtml = headingsList
-      .map((h) => `• <a href="#chapter-${h.id}">${h.text}</a>`)
-      .join('<br/>');
-    const newBlock: ContentBlock = {
-      id: `p-toc-${Date.now()}`,
-      type: 'paragraph',
-      text: tocItemsHtml,
-    };
-    const targetPos = focusedBlockIndex !== null && focusedBlockIndex >= 0
-      ? focusedBlockIndex + 1
-      : 0;
-    const nextBlocks = [
-      ...currentNote.blocks.slice(0, targetPos),
-      newBlock,
-      ...currentNote.blocks.slice(targetPos),
-    ];
-    persistChange({ ...currentNote, blocks: nextBlocks }, true);
-    setFocusedBlockIndex(targetPos);
-  };
-
   const executeExport = async (payload: any) => {
     const result = await exportNoteToTelegram(payload);
     if (result.success) {
@@ -3675,6 +3715,9 @@ const [isAllBlocksSelected, setIsAllBlocksSelected] = useState<boolean>(false);
             <button
               onClick={() => {
                 triggerHaptic();
+                if (!showToc) {
+                  forceDismissKeyboard();
+                }
                 setShowToc(!showToc);
               }}
               className={`w-7 h-7 rounded-full flex items-center justify-center border transition-all active:scale-95 ${
@@ -4101,55 +4144,6 @@ const [isAllBlocksSelected, setIsAllBlocksSelected] = useState<boolean>(false);
           )}
         </div>
       </div>
-
-      {showToc && (
-         <div className="my-2 p-3 rounded-xl bg-cream-surface border border-cream-divider animate-toc-down shadow-sm">
-           <div className="flex items-center justify-between pb-2 border-b border-cream-divider/60">
-             <span className="text-xs font-semibold text-warm-text uppercase tracking-wider">{t('toc_title')}</span>
-             <button onClick={() => setShowToc(false)} className="text-warm-muted hover:text-warm-text">
-               <span className="material-symbols-outlined text-[16px]">close</span>
-             </button>
-           </div>
-           <div className="flex flex-col gap-1.5 pt-2 max-h-48 overflow-y-auto">
-                 {headingsList.length === 0 ? (
-                   <span className="text-xs text-warm-subtle italic">{t('toc_empty')}</span>
-                 ) : (
-                   headingsList.map((hBlock) => {
-                     const indentStyles: Record<number, string> = {
-                       1: 'pl-1 text-[13px] font-bold text-warm-text',
-                       2: 'pl-3 text-xs font-semibold text-warm-text',
-                       3: 'pl-5 text-xs font-medium text-warm-text',
-                       4: 'pl-7 text-xs font-normal text-warm-muted',
-                       5: 'pl-9 text-[11px] font-normal text-warm-muted',
-                       6: 'pl-11 text-[11px] font-normal text-warm-subtle',
-                     };
-                     const styleClass = indentStyles[hBlock.size] || indentStyles[2];
-                     return (
-                       <button
-                         key={hBlock.id}
-                         onClick={() => scrollToHeading(hBlock.id)}
-                         className={`text-left transition-colors truncate hover:text-warm-accent ${styleClass}`}
-                       >
-                         {hBlock.text}
-                       </button>
-                     );
-                   })
-                 )}
-           </div>
-           {headingsList.length > 0 && (
-             <div className="pt-2 mt-1 border-t border-cream-divider/50 flex justify-end">
-               <button
-                 type="button"
-                 onClick={insertTocIntoNote}
-                 className="text-[11px] font-semibold text-warm-accent hover:underline flex items-center gap-1 active:opacity-70 transition-opacity"
-               >
-                 <span className="material-symbols-outlined text-[13px]">format_list_bulleted</span>
-                 <span>{t('toc_insert_button')}</span>
-               </button>
-             </div>
-           )}
-         </div>
-       )}
 
       <div className="flex flex-col pt-3 shrink-0">
         <textarea
@@ -5376,7 +5370,137 @@ const [isAllBlocksSelected, setIsAllBlocksSelected] = useState<boolean>(false);
         </div>
       </div>
 
-      {(isEditorActive || isAllBlocksSelected) && !showExportModal && !editingButtonModal && !timePickerModal.isOpen && !linkModal.isOpen &&
+      {showToc &&
+        createPortal(
+          <div
+            data-modal="true"
+            onClick={() => setShowToc(false)}
+            className="fixed inset-0 z-50 flex flex-col justify-end items-center bg-[#24201D]/40 animate-page-fade"
+          >
+            <div
+              data-modal="true"
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-[420px] max-h-[65vh] flex flex-col rounded-t-2xl bg-[#FAF8F5] border-t border-cream-divider shadow-lg animate-sheet-up overflow-hidden select-none"
+              style={{
+                paddingBottom:
+                  'calc(max(var(--tg-content-bottom, 0px), var(--tg-safe-bottom, 0px), env(safe-area-inset-bottom, 0px)) + 16px)',
+              }}
+            >
+              <div className="w-full flex justify-center pt-2.5 pb-1 shrink-0">
+                <div className="w-8 h-1 rounded-full bg-cream-divider" />
+              </div>
+
+              <div className="flex items-center justify-between px-5 pt-1 pb-2.5 border-b border-cream-divider/60 shrink-0">
+                <span className="text-xs font-semibold uppercase tracking-wider text-warm-text">
+                  {t('toc_title')}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowToc(false)}
+                  className="w-7 h-7 rounded-full flex items-center justify-center text-warm-muted hover:text-warm-text hover:bg-cream-surface transition-colors"
+                >
+                  <span className="material-symbols-outlined text-[18px]">close</span>
+                </button>
+              </div>
+
+              <div className="flex-1 min-h-0 overflow-y-auto px-4 py-2.5 flex flex-col overscroll-contain">
+                {headingsList.length === 0 ? (
+                  <div className="py-8 flex items-center justify-center text-center">
+                    <span className="text-xs text-warm-subtle italic">{t('toc_empty')}</span>
+                  </div>
+                ) : (
+                  (() => {
+                    const stack: { size: number; depth: number }[] = [];
+                    const depths = headingsList.map((h) => {
+                      while (stack.length > 0 && stack[stack.length - 1].size >= h.size) {
+                        stack.pop();
+                      }
+                      const depth = Math.min(4, stack.length);
+                      stack.push({ size: h.size, depth });
+                      return depth;
+                    });
+
+                    const hasSiblingBelow = (startIdx: number, targetLvl: number): boolean => {
+                      for (let k = startIdx + 1; k < depths.length; k++) {
+                        if (depths[k] < targetLvl) return false;
+                        if (depths[k] === targetLvl) return true;
+                      }
+                      return false;
+                    };
+
+                    return headingsList.map((hBlock, idx) => {
+                      const depth = depths[idx];
+                      return (
+                        <button
+                          key={hBlock.id}
+                          type="button"
+                          onClick={() => scrollToHeading(hBlock.id)}
+                          className={`w-full pr-2.5 rounded-lg flex items-stretch text-left hover:bg-cream-surface/70 active:bg-cream-surface transition-colors group ${
+                            depth === 0 && idx > 0 ? 'mt-1' : ''
+                          }`}
+                        >
+                          {depth > 0 &&
+                            Array.from({ length: depth }, (_, i) => {
+                              const lvl = i + 1;
+                              const isCurrentBranch = lvl === depth;
+                              const continuesDown = hasSiblingBelow(idx, lvl);
+
+                              if (!isCurrentBranch) {
+                                return (
+                                  <div key={lvl} className="w-5 shrink-0 relative">
+                                    {continuesDown && (
+                                      <div className="absolute left-2.5 top-0 bottom-0 w-[1.5px] bg-cream-divider group-hover:bg-warm-subtle/60 transition-colors" />
+                                    )}
+                                  </div>
+                                );
+                              }
+
+                              return (
+                                <div key={lvl} className="w-5 shrink-0 relative">
+                                  {continuesDown ? (
+                                    <>
+                                      <div className="absolute left-2.5 top-0 bottom-0 w-[1.5px] bg-cream-divider group-hover:bg-warm-subtle/60 transition-colors" />
+                                      <div className="absolute left-2.5 top-1/2 w-2.5 h-[1.5px] bg-cream-divider group-hover:bg-warm-subtle/60 transition-colors" />
+                                    </>
+                                  ) : (
+                                    <div className="absolute left-2.5 top-0 h-1/2 w-2.5 border-l-[1.5px] border-b-[1.5px] border-cream-divider group-hover:border-warm-subtle/60 rounded-bl-[5px] transition-colors" />
+                                  )}
+                                </div>
+                              );
+                            })}
+
+                          <div
+                            className={`flex-1 min-w-0 flex items-center justify-between gap-3 py-1.5 ${
+                              depth === 0 ? 'pl-2.5' : 'pl-1'
+                            }`}
+                          >
+                            <span
+                              className={`truncate transition-colors group-hover:text-warm-accent ${
+                                depth === 0
+                                  ? 'text-[13.5px] font-semibold text-warm-text'
+                                  : depth === 1
+                                  ? 'text-[12.5px] font-medium text-warm-text/90'
+                                  : 'text-xs font-normal text-warm-muted'
+                              }`}
+                            >
+                              {hBlock.text}
+                            </span>
+                            <span className="text-[10px] font-mono text-warm-subtle shrink-0">
+                              H{hBlock.size}
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    });
+                  })()
+                )}
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
+      {(isEditorActive || isAllBlocksSelected) && !showToc && !showExportModal && !editingButtonModal && !timePickerModal.isOpen && !linkModal.isOpen &&
         createPortal(
           <div
             data-format-bar="true"
